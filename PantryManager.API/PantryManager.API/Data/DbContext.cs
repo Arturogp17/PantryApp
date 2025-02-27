@@ -11,5 +11,22 @@ namespace PantryManager.API.Data
         public DbSet<Product> Products { get; set; }
         public DbSet<Purchase> Purchases { get; set; }
         public DbSet<PurchaseItem> PurchaseItems { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Product>()
+                .Property(p => p.RowVersion)
+                .IsRowVersion();
+            
+            modelBuilder.Entity<PurchaseItem>()
+                .HasOne(pi => pi.Product)
+                .WithMany()
+                .HasForeignKey(pi => pi.ProductId);
+            
+            modelBuilder.Entity<PurchaseItem>()
+                .HasOne(pi => pi.Purchase)
+                .WithMany(p => p.PurchaseItems)
+                .HasForeignKey(pi => pi.PurchaseId);
+        }
     }
 }
