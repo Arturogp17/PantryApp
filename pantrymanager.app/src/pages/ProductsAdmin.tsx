@@ -26,7 +26,7 @@ const ProductsAdmin = () => {
 
   const loadProducts = async () => {
     try {
-      const response = await api.get('/api/products'); // Asegúrate de que la URL sea correcta
+      const response = await api.get('/products'); // Asegúrate de que la URL sea correcta
       setProducts(response.data);
     } catch (error) {
       console.error('Error cargando productos:', error);
@@ -62,9 +62,9 @@ const ProductsAdmin = () => {
 
     try {
       if (editMode) {
-        await api.put(`/api/products/${currentProduct.id}`, currentProduct); // Asegúrate de que la URL sea correcta
+        await api.put(`/products/${currentProduct.id}`, currentProduct); // Actualizar producto
       } else {
-        await api.post('/api/products', currentProduct); // Asegúrate de que la URL sea correcta
+        await api.post('/products', currentProduct); // Crear producto
       }
       loadProducts();
       handleCloseDialog();
@@ -77,7 +77,7 @@ const ProductsAdmin = () => {
 
   const handleDelete = async (id: number) => {
     try {
-      await api.delete(`/api/products/${id}`); // Asegúrate de que la URL sea correcta
+      await api.delete(`/products/${id}`); // Eliminar producto
       loadProducts();
     } catch (error) {
       console.error('Error eliminando producto:', error);

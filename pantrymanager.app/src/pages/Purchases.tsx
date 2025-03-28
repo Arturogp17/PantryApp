@@ -13,7 +13,7 @@ import {
 import { Delete } from "@mui/icons-material";
 import api from "../api/client";
 import ProductSearch from "../components/Purchases/ProductSearch";
-import { Product, PurchaseItem, PurchaseResponse, ApiError } from "../types";
+import { Product, PurchaseResponse, ApiError } from "../types";
 
 const Purchases = () => {
   const [cart, setCart] = useState<Array<{
@@ -25,51 +25,68 @@ const Purchases = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAddToCart = (product: Product, quantity: number) => {
-    const existingItemIndex = cart.findIndex(item => item.product.id === product.id);
-    
-    if (existingItemIndex >= 0) {
-      const updatedCart = [...cart];
-      updatedCart[existingItemIndex].quantity += quantity;
-      setCart(updatedCart);
-    } else {
-      setCart([...cart, { 
-        product, 
-        quantity, 
-        unitPrice: product.price 
-      }]);
-    }
-    
-    recalculateTotal();
-  };
-
-  const recalculateTotal = () => {
-    const newTotal = cart.reduce((acc, item) => 
-      acc + (item.quantity * item.unitPrice), 0);
-    setTotal(newTotal);
+    setCart(prevCart => {
+      const existingItemIndex = prevCart.findIndex(item => item.product.id === product.id);
+      const newCart = [...prevCart];
+      
+      if (existingItemIndex >= 0) {
+        newCart[existingItemIndex].quantity += quantity;
+      } else {
+        newCart.push({ 
+          product, 
+          quantity, 
+          unitPrice: product.price 
+        });
+      }
+      
+      // Calcular el total inmediatamente con el nuevo carrito
+      const newTotal = newCart.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+      setTotal(newTotal);
+      
+      return newCart;
+    });
   };
 
   const handleQuantityChange = (index: number, newQuantity: number) => {
     if (newQuantity > 0) {
-      const updatedCart = [...cart];
-      updatedCart[index].quantity = newQuantity;
-      setCart(updatedCart);
-      recalculateTotal();
+      setCart(prevCart => {
+        const updatedCart = [...prevCart];
+        updatedCart[index].quantity = newQuantity;
+        
+        // Recalcular el total
+        const newTotal = updatedCart.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+        setTotal(newTotal);
+        
+        return updatedCart;
+      });
     }
   };
 
   const handlePriceChange = (index: number, newPrice: number) => {
     if (newPrice >= 0) {
-      const updatedCart = [...cart];
-      updatedCart[index].unitPrice = newPrice;
-      setCart(updatedCart);
-      recalculateTotal();
+      setCart(prevCart => {
+        const updatedCart = [...prevCart];
+        updatedCart[index].unitPrice = newPrice;
+        
+        // Recalcular el total
+        const newTotal = updatedCart.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+        setTotal(newTotal);
+        
+        return updatedCart;
+      });
     }
   };
 
   const handleRemoveFromCart = (index: number) => {
-    const updatedCart = cart.filter((_, i) => i !== index);
-    setCart(updatedCart);
-    recalculateTotal();
+    setCart(prevCart => {
+      const updatedCart = prevCart.filter((_, i) => i !== index);
+      
+      // Recalcular el total
+      const newTotal = updatedCart.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+      setTotal(newTotal);
+      
+      return updatedCart;
+    });
   };
 
   const handleSubmit = async () => {
@@ -84,13 +101,14 @@ const Purchases = () => {
         items: cart.map(item => ({
           productId: item.product.id,
           quantity: item.quantity,
-          unitPrice: item.unitPrice,
+          purchasePrice: item.unitPrice,
           currentStock: item.product.quantity
-        } as PurchaseItem))
+        }))
       };
 
-      const response = await api.post<PurchaseResponse>("/purchases", purchaseData);
-      alert(`Compra registrada con éxito. ID: ${response.data.id}`);
+      await api.post<PurchaseResponse>("/purchases", purchaseData);
+      
+      alert("¡Compra registrada y stock actualizado exitosamente!");
       setCart([]);
       setTotal(0);
       window.dispatchEvent(new Event('inventory-updated'));
@@ -106,19 +124,16 @@ const Purchases = () => {
     let errorMessage = "Error al registrar la compra";
     
     if (isApiError(error)) {
-      // Manejo de errores de Axios
       errorMessage = error.response?.data?.message || 
                     error.message || 
                     errorMessage;
       
-      // Manejo de errores de validación del backend
       if (error.response?.data?.errors) {
         errorMessage = Object.values(error.response.data.errors)
           .flat()
           .join('\n');
       }
     } else if (error instanceof Error) {
-      // Manejo de errores estándar
       errorMessage = error.message;
     }
 
@@ -160,14 +175,17 @@ const Purchases = () => {
                 <ListItemText
                   primary={item.product.name}
                   secondary={
-                    <>
-                      <Box sx={{ 
-                        display: 'flex', 
-                        gap: 2, 
-                        alignItems: 'center', 
-                        mt: 1,
-                        flexWrap: 'wrap' 
-                      }}>
+                    <Box component="div">
+                      <Box 
+                        component="div"
+                        sx={{ 
+                          display: 'flex', 
+                          gap: 2, 
+                          alignItems: 'center', 
+                          mt: 1,
+                          flexWrap: 'wrap' 
+                        }}
+                      >
                         <TextField
                           label="Cantidad"
                           type="number"
@@ -195,21 +213,27 @@ const Purchases = () => {
                           }}
                           sx={{ width: 140 }}
                         />
-                        <Typography variant="body2">
-                          Stock: {item.product.quantity} {item.product.unitOfMeasure}
-                        </Typography>
-                        <Typography variant="body2">
+                        
+                        <Typography variant="body2" component="div">
                           {item.product.unitOfMeasure}
+                        </Typography>
+                        
+                        <Typography variant="body2" component="div">
+                          Stock disponible: {item.product.quantity}
                         </Typography>
                       </Box>
                       
-                      <Typography variant="body2" component="div" sx={{ mt: 1 }}>
+                      <Typography 
+                        variant="body2" 
+                        component="div" 
+                        sx={{ mt: 1 }}
+                      >
                         Subtotal: ${(item.quantity * item.unitPrice).toLocaleString('es-CL', {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2
                         })}
                       </Typography>
-                    </>
+                    </Box>
                   }
                 />
               </ListItem>
