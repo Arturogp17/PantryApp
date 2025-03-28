@@ -16,6 +16,7 @@ var allowedOrigins = new[]
     "https://localhost:7001",   // Backend HTTPS
     "http://localhost:5163"     // Backend HTTP
 };
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -37,6 +38,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddDbContext<PantryContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("PantryConnection")));
 builder.Services.AddScoped<AuthService>();
+
 // 3. Configurar Autenticación JWT
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var key = Encoding.UTF8.GetBytes(jwtSettings["Key"]!);
@@ -101,6 +103,7 @@ var app = builder.Build();
 // 5. Configurar Middleware (ORDEN CRÍTICO)
 app.UseRouting();
 
+// Mover la política CORS antes de la autenticación
 app.UseCors("MyCorsPolicy");
 
 app.UseAuthentication();

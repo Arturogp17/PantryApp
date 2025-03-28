@@ -3,12 +3,6 @@ using System.ComponentModel.DataAnnotations;
 
 namespace PantryManager.API.Models
 {
-    public enum StockType
-    {
-        Units = 0,
-        Kilograms = 1,
-        Liters = 2
-    }
 
     public class Product
     {
@@ -18,16 +12,27 @@ namespace PantryManager.API.Models
         public string ImageUrl { get; set; }
         public decimal Quantity { get; set; }
         public decimal Price { get; set; }
-        public StockType StockType { get; set; }
+        public int StockType { get; set; }
         
-        [Timestamp]
-        public byte[] RowVersion { get; set; }
 
         public string UnitOfMeasure => StockType switch
         {
-            StockType.Kilograms => "kg",
-            StockType.Liters => "L",
+            1 => "kg",
+            2 => "L",
             _ => "unidades"
         };
+
+        public string FormattedImageUrl 
+    {
+        get 
+        {
+            if (!string.IsNullOrEmpty(ImageUrl) && ImageUrl.StartsWith("https://drive.google.com/file/d/"))
+            {
+                var fileId = ImageUrl.Split("/d/")[1]?.Split('/')[0];
+                return $"https://drive.google.com/uc?export=view&id={fileId}";
+            }
+            return ImageUrl;
+        }
+    }
     }
 }

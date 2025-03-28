@@ -14,9 +14,6 @@ namespace PantryManager.API.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            modelBuilder.Entity<Product>()
-                .Property(p => p.RowVersion)
-                .IsRowVersion();
             
             modelBuilder.Entity<PurchaseItem>()
                 .HasOne(pi => pi.Product)

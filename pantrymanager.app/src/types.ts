@@ -7,8 +7,9 @@ export interface Product {
   imageUrl: string;
   quantity: number;
   price: number;
-  stockType: 'Units' | 'Kilograms' | 'Liters';
+  stockType: number;
   unitOfMeasure: string;
+  formattedImageUrl: string;
 }
 
 export interface PurchaseItem {

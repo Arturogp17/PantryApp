@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Grid, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from '@mui/material';
+import { Button, Grid, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Select, MenuItem, InputLabel, FormControl } from '@mui/material';
 import { Delete, Edit, Add } from '@mui/icons-material';
 import api from '../api/client';
 import { Product } from '../types';
@@ -14,7 +14,9 @@ const ProductsAdmin = () => {
     name: '',
     description: '',
     quantity: 0,
-    imageUrl: ''
+    price: 0,
+    imageUrl: '',
+    stockType: 0, // Asegúrate de tener un valor inicial válido para stockType
   });
 
   // Cargar productos al montar el componente
@@ -38,7 +40,9 @@ const ProductsAdmin = () => {
       name: '',
       description: '',
       quantity: 0,
-      imageUrl: ''
+      price: 0,
+      imageUrl: '',
+      stockType: 0, // Asegúrate de que se reseteen todos los campos
     });
     setEditMode(false);
     setOpenDialog(true);
@@ -64,7 +68,7 @@ const ProductsAdmin = () => {
       if (editMode) {
         await api.put(`/products/${currentProduct.id}`, currentProduct); // Actualizar producto
       } else {
-        await api.post('/products', currentProduct); // Crear producto
+        await api.post('/products/CreateProduct', currentProduct); // Crear producto
       }
       loadProducts();
       handleCloseDialog();
@@ -107,6 +111,7 @@ const ProductsAdmin = () => {
                 <TableCell>Nombre</TableCell>
                 <TableCell>Descripción</TableCell>
                 <TableCell>Stock</TableCell>
+                <TableCell>Precio</TableCell>
                 <TableCell>Imagen</TableCell>
                 <TableCell>Acciones</TableCell>
               </TableRow>
@@ -116,7 +121,8 @@ const ProductsAdmin = () => {
                 <TableRow key={product.id}>
                   <TableCell>{product.name}</TableCell>
                   <TableCell>{product.description}</TableCell>
-                  <TableCell>{product.quantity}</TableCell>
+                  <TableCell>{product.quantity + ' ' + product.unitOfMeasure}</TableCell>
+                  <TableCell>{"$" + product.price}</TableCell>
                   <TableCell>
                     {product.imageUrl && (
                       <img 
@@ -177,10 +183,32 @@ const ProductsAdmin = () => {
             <Grid item xs={12}>
               <TextField
                 fullWidth
+                label="Precio"
+                type="number"
+                value={currentProduct.price}
+                onChange={(e) => setCurrentProduct({...currentProduct, price: Number(e.target.value)})}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
                 label="URL de la imagen"
                 value={currentProduct.imageUrl}
                 onChange={(e) => setCurrentProduct({...currentProduct, imageUrl: e.target.value})}
               />
+            </Grid>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Tipo de Producto</InputLabel>
+                <Select
+                  value={currentProduct.stockType}
+                  onChange={(e) => setCurrentProduct({ ...currentProduct, stockType: Number(e.target.value) })} // Convertir a número
+                >
+                  <MenuItem value={0}>Unidades</MenuItem>
+                  <MenuItem value={1}>Kilogramos</MenuItem>
+                  <MenuItem value={2}>Litros</MenuItem>
+                </Select>
+              </FormControl>
             </Grid>
           </Grid>
         </DialogContent>

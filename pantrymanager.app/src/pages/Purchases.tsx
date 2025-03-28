@@ -195,7 +195,7 @@ const Purchases = () => {
                           onChange={(e) => handleQuantityChange(index, Math.max(1, Number(e.target.value)))}
                           inputProps={{ 
                             min: 1,
-                            step: item.product.stockType === 'Units' ? 1 : 0.1
+                            step: item.product.unitOfMeasure === 'unidades' ? 1 : 0.1
                           }}
                           sx={{ width: 120 }}
                         />
@@ -221,6 +221,17 @@ const Purchases = () => {
                         <Typography variant="body2" component="div">
                           Stock disponible: {item.product.quantity}
                         </Typography>
+                        {item.product.imageUrl && (
+                          <Box sx={{ marginTop: 1 }}>
+                            <img
+                              src={item.product.imageUrl}
+                              alt={item.product.name}
+                              style={{ width: '100px', height: 'auto', borderRadius: '4px' }}
+                              referrerPolicy="no-referrer"
+                            />
+                          </Box>
+                        )}
+                        
                       </Box>
                       
                       <Typography 

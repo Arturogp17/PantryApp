@@ -55,12 +55,22 @@ namespace PantryManager.API.Controllers
         // POST: api/Products (solo admin)
         [Authorize(Roles = "Admin")]
         [HttpPost]
+        [Route("CreateProduct")]
         public async Task<ActionResult<Product>> PostProduct(Product product)
         {
-            _context.Products.Add(product);
-            await _context.SaveChangesAsync();
+            try
+            {
+                _context.Products.Add(product);
+                await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
+                return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
+            }
+            catch (Exception ex)
+            {
+                // Log de error
+                Console.WriteLine("Error al guardar el producto: " + ex.Message);
+                return StatusCode(500, "Error interno del servidor.");
+            }
         }
 
         // PUT: api/Products/5 (solo admin)

@@ -33,7 +33,7 @@ const Dashboard = () => {
   if (!isAuthenticated) return <div>Acceso no autorizado</div>;
 
   return (
-    <Box sx={{ padding: 3 }}>
+    <Box sx={{ padding: 5 }}>
       <Typography variant="h4" gutterBottom>
         Dashboard
       </Typography>

@@ -15,13 +15,14 @@ const ProductGrid = ({ products, mode }: ProductGridProps) => {
             <Paper sx={{ padding: 2 }}>
               <Typography variant="h6">{product.name}</Typography>
               <Typography variant="body1">{product.description}</Typography>
-              <Typography variant="body2">Stock: {product.quantity}</Typography>
+              <Typography variant="body2">Stock: {product.quantity + ' ' + product.unitOfMeasure}</Typography>
               {product.imageUrl && (
                 <Box sx={{ marginTop: 2 }}>
                   <img
                     src={product.imageUrl}
                     alt={product.name}
-                    style={{ width: '100%', height: 'auto', borderRadius: '4px' }}
+                    style={{ width: '100px', height: 'auto', borderRadius: '4px' }}
+                    referrerPolicy="no-referrer"
                   />
                 </Box>
               )}
@@ -45,7 +46,7 @@ const ProductGrid = ({ products, mode }: ProductGridProps) => {
                   {product.description}
                 </Typography>
                 <Typography variant="body2" component="div"> {/* Cambia el componente raíz a "div" */}
-                  Stock: {product.quantity}
+                  Stock: {product.quantity + ' ' + product.unitOfMeasure}
                 </Typography>
                 {product.imageUrl && (
                   <Box sx={{ marginTop: 1 }}>
@@ -53,6 +54,7 @@ const ProductGrid = ({ products, mode }: ProductGridProps) => {
                       src={product.imageUrl}
                       alt={product.name}
                       style={{ width: '100px', height: 'auto', borderRadius: '4px' }}
+                      referrerPolicy="no-referrer"
                     />
                   </Box>
                 )}
