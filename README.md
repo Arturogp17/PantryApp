@@ -61,6 +61,8 @@ Variables de entorno del API (App Service, en "Configuración"):
 
 Una combinación que cabe en los planes gratuitos: Azure Static Web Apps para el frontend, App Service F1 para el API y Azure SQL con la oferta gratuita. En el frontend, `VITE_API_URL` se fija al construir (`npm run build`, que deja los archivos en `dist`).
 
+El despliegue se hace con GitHub Actions (`.github/workflows`) al hacer push a `main`. La guía paso a paso, con los comandos de Azure, está en [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md).
+
 ## Pruebas
 
 ```

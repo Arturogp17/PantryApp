@@ -1,0 +1,18 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/mascots/*", "/*.{png,ico,json,txt,js,css,svg,webp}"]
+  },
+  "routes": [
+    {
+      "route": "/sw.js",
+      "headers": { "Cache-Control": "no-cache" }
+    }
+  ],
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=()"
+  }
+}
