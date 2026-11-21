@@ -1,145 +1,124 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { 
-  Box,
-  Button,
-  TextField,
-  Typography,
-  Paper,
-  Grid,
-  Avatar,
-  Link,
-  Alert,
-  Container
-} from "@mui/material";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import { FormEvent, useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { Alert, Box, Button, TextField, Typography } from "@mui/material";
 import api from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+import { useAppTheme } from "../theme/ThemeContext";
+import { FishMascot, ToastMascot } from "../components/Mascots";
+import axios from "axios";
+import { errorMessage } from "../lib/errors";
 
 const Login = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
+  const { tokens } = useAppTheme();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  if (isAuthenticated) return <Navigate to="/super" replace />;
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setBusy(true);
+    setError("");
+
     try {
-      const response = await api.post("/auth/login", { username, password });
+      const response = await api.post<{ token: string }>("/auth/login", { username, password });
       login(response.data.token);
-      navigate("/dashboard");
-    } catch (error) {
-      setErrorMessage("Credenciales incorrectas o error de conexión");
+      navigate("/super", { replace: true });
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 429) {
+        setError("Demasiados intentos. Espera unos minutos.");
+      } else {
+        setError(errorMessage(err, "Usuario o contraseña incorrectos"));
+      }
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <Container component="main" maxWidth="lg">
-      <Grid container sx={{ minHeight: "100vh", p: 4 }}>
-        {/* Sección de imagen */}
-        <Grid
-          item
-          xs={12}
-          md={6}
-          sx={{
-            display: { xs: "none", md: "block" },
-            backgroundImage: "url(https://source.unsplash.com/random?office)",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            borderRadius: 4,
-            mr: { md: 4 }
-          }}
+    <Box
+      sx={{
+        position: "relative",
+        zIndex: 1,
+        minHeight: "100dvh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        px: 2,
+      }}
+    >
+      <Box
+        component="form"
+        onSubmit={handleSubmit}
+        sx={{
+          width: "100%",
+          maxWidth: 380,
+          p: 3,
+          bgcolor: tokens.surface,
+          borderRadius: `${tokens.radius}px`,
+          border: tokens.border === "none" ? `1px solid ${tokens.line}` : tokens.border,
+          boxShadow: tokens.shadow,
+        }}
+      >
+        <Box sx={{ display: "flex", justifyContent: "center", gap: 2, mb: 1 }}>
+          <FishMascot size={84} />
+          <ToastMascot size={84} />
+        </Box>
+
+        <Typography component="h1" variant="h5" sx={{ textAlign: "center", mb: 2 }}>
+          PantryApp
+        </Typography>
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 1 }}>
+            {error}
+          </Alert>
+        )}
+
+        <TextField
+          fullWidth
+          margin="normal"
+          id="username"
+          name="username"
+          label="Usuario"
+          required
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
+          autoCapitalize="none"
+          autoFocus
+          slotProps={{ htmlInput: { spellCheck: false, enterKeyHint: "next" } }}
         />
-        
-        {/* Sección del formulario */}
-        <Grid
-          item
-          xs={12}
-          md={5}
-          component={Paper}
-          elevation={6}
-          sx={{
-            p: 4,
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            borderRadius: 4,
-            minHeight: { md: "80vh" },
-            margin: "auto"
-          }}
+        <TextField
+          fullWidth
+          margin="normal"
+          id="password"
+          name="password"
+          label="Contraseña"
+          required
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          slotProps={{ htmlInput: { enterKeyHint: "done" } }}
+        />
+
+        <Button
+          fullWidth
+          type="submit"
+          variant="contained"
+          size="large"
+          disabled={busy || username === "" || password === ""}
+          sx={{ mt: 2 }}
         >
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              maxWidth: 400,
-              mx: "auto",
-              width: "100%"
-            }}
-          >
-            <Avatar sx={{ m: 2, bgcolor: "primary.main" }}>
-              <LockOutlinedIcon />
-            </Avatar>
-            
-            <Typography component="h1" variant="h5" sx={{ mb: 2 }}>
-              Iniciar sesión
-            </Typography>
-
-            <Box component="form" onSubmit={handleSubmit} sx={{ width: "100%" }}>
-              {errorMessage && (
-                <Alert severity="error" sx={{ mb: 2 }}>
-                  {errorMessage}
-                </Alert>
-              )}
-
-              <TextField
-                fullWidth
-                margin="normal"
-                label="Usuario"
-                variant="outlined"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoFocus
-              />
-
-              <TextField
-                fullWidth
-                margin="normal"
-                label="Contraseña"
-                type="password"
-                variant="outlined"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-
-              <Button
-                fullWidth
-                variant="contained"
-                size="large"
-                type="submit"
-                sx={{ mt: 3, mb: 2 }}
-              >
-                Ingresar
-              </Button>
-
-              <Box textAlign="center">
-                <Link 
-                  onClick={() => navigate("/register")}
-                  sx={{ 
-                    cursor: "pointer",
-                    "&:hover": { color: "primary.main" }
-                  }}
-                >
-                  ¿No tienes cuenta? Regístrate
-                </Link>
-              </Box>
-            </Box>
-          </Box>
-        </Grid>
-      </Grid>
-    </Container>
+          Entrar
+        </Button>
+      </Box>
+    </Box>
   );
 };
 

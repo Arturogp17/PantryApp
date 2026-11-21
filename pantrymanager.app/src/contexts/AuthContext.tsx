@@ -16,62 +16,61 @@ const AuthContext = createContext<AuthContextType>({
   logout: () => {},
 });
 
+const ROLE_CLAIM = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role";
+
+interface AuthState {
+  isAuthenticated: boolean;
+  isAdmin: boolean;
+}
+
+const LOGGED_OUT: AuthState = { isAuthenticated: false, isAdmin: false };
+
+// Lee el estado de sesión a partir del token guardado. Se calcula al crear el contexto
+// para que una recarga en /super no pase antes por /login.
+const stateFromToken = (token: string | null): AuthState => {
+  if (!token) return LOGGED_OUT;
+
+  try {
+    const decoded = jwtDecode<{ exp: number; [key: string]: unknown }>(token);
+    if (Date.now() >= decoded.exp * 1000) return LOGGED_OUT;
+
+    return { isAuthenticated: true, isAdmin: decoded[ROLE_CLAIM] === "Admin" };
+  } catch {
+    return LOGGED_OUT;
+  }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [auth, setAuth] = useState<AuthState>(() => stateFromToken(localStorage.getItem("token")));
   const navigate = useNavigate();
-
-  const decodeToken = (token: string) => {
-    try {
-      return jwtDecode<{ exp: number; [key: string]: any }>(token);
-    } catch (error) {
-      throw new Error("Token inválido");
-    }
-  };
-
-  const validateToken = useCallback((token: string) => {
-    try {
-      const decoded = decodeToken(token);
-      const isExpired = Date.now() >= decoded.exp * 1000;
-
-      if (isExpired) throw new Error("Token expirado");
-
-      setIsAuthenticated(true);
-      setIsAdmin(
-        decoded["http://schemas.microsoft.com/ws/2008/06/identity/claims/role"] === "Admin"
-      );
-    } catch (error) {
-      console.error("Error validando token:", error);
-      logout();
-    }
-  }, []);
-
-  const login = useCallback((token: string) => {
-    localStorage.setItem("token", token);
-    validateToken(token);
-  }, [validateToken]);
 
   const logout = useCallback(() => {
     localStorage.removeItem("token");
-    setIsAuthenticated(false);
-    setIsAdmin(false);
+    setAuth(LOGGED_OUT);
     navigate("/login");
   }, [navigate]);
 
+  const login = useCallback((token: string) => {
+    localStorage.setItem("token", token);
+    setAuth(stateFromToken(token));
+  }, []);
+
   useEffect(() => {
     const handleUnauthorized = () => logout();
-    
-    window.addEventListener('unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('unauthorized', handleUnauthorized);
+
+    window.addEventListener("unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("unauthorized", handleUnauthorized);
   }, [logout]);
 
+  // Si el token guardado ya venció, se limpia.
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (token) validateToken(token);
-  }, [validateToken]);
+    if (!auth.isAuthenticated && localStorage.getItem("token")) {
+      localStorage.removeItem("token");
+    }
+  }, [auth.isAuthenticated]);
 
   return (
-    <AuthContext.Provider value={{ isAdmin, isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ ...auth, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

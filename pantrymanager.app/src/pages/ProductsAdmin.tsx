@@ -1,225 +1,271 @@
-import React, { useEffect, useState } from 'react';
-import { Button, Grid, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Select, MenuItem, InputLabel, FormControl } from '@mui/material';
-import { Delete, Edit, Add } from '@mui/icons-material';
-import api from '../api/client';
-import { Product } from '../types';
-import { useAuth } from '../contexts/AuthContext';
+import { useCallback, useEffect, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Snackbar,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from "@mui/material";
+import { Add, Delete, Edit } from "@mui/icons-material";
+import api from "../api/client";
+import { Product } from "../types";
+import { useAuth } from "../contexts/AuthContext";
+import { errorMessage } from "../lib/errors";
+import { normalizeBarcode } from "../lib/barcode";
+import { formatMoney, formatQuantity } from "../lib/money";
+import { STOCK_TYPES } from "../lib/units";
+
+interface Draft {
+  id?: number;
+  name: string;
+  description: string;
+  barcode: string;
+  quantity: string;
+  price: string;
+  imageUrl: string;
+  stockType: number;
+}
+
+const EMPTY: Draft = { name: "", description: "", barcode: "", quantity: "0", price: "0", imageUrl: "", stockType: 0 };
+
+const toDraft = (p: Product): Draft => ({
+  id: p.id,
+  name: p.name,
+  description: p.description ?? "",
+  barcode: p.barcode ?? "",
+  quantity: String(p.quantity),
+  price: String(p.price),
+  imageUrl: p.imageUrl ?? "",
+  stockType: p.stockType,
+});
 
 const ProductsAdmin = () => {
   const { isAdmin } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
-  const [openDialog, setOpenDialog] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [currentProduct, setCurrentProduct] = useState<Partial<Product>>({
-    name: '',
-    description: '',
-    quantity: 0,
-    price: 0,
-    imageUrl: '',
-    stockType: 0, // Asegúrate de tener un valor inicial válido para stockType
-  });
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [formError, setFormError] = useState("");
+  const [message, setMessage] = useState("");
 
-  // Cargar productos al montar el componente
-  useEffect(() => {
-    if (isAdmin) {
-      loadProducts();
-    }
-  }, [isAdmin]);
-
-  const loadProducts = async () => {
+  const load = useCallback(async () => {
     try {
-      const response = await api.get('/products'); // Asegúrate de que la URL sea correcta
+      const response = await api.get<Product[]>("/products");
       setProducts(response.data);
     } catch (error) {
-      console.error('Error cargando productos:', error);
+      setMessage(errorMessage(error, "No se pudieron cargar los productos"));
     }
-  };
+  }, []);
 
-  const handleOpenCreate = () => {
-    setCurrentProduct({
-      name: '',
-      description: '',
-      quantity: 0,
-      price: 0,
-      imageUrl: '',
-      stockType: 0, // Asegúrate de que se reseteen todos los campos
-    });
-    setEditMode(false);
-    setOpenDialog(true);
-  };
+  useEffect(() => {
+    if (isAdmin) load();
+  }, [isAdmin, load]);
 
-  const handleOpenEdit = (product: Product) => {
-    setCurrentProduct(product);
-    setEditMode(true);
-    setOpenDialog(true);
-  };
+  if (!isAdmin) {
+    return (
+      <Box sx={{ position: "relative", zIndex: 1, p: 3 }}>
+        <Typography>Acceso no autorizado</Typography>
+      </Box>
+    );
+  }
 
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-  };
+  const save = async () => {
+    if (!draft) return;
 
-  const handleSubmit = async () => {
-    if (!currentProduct.name || !currentProduct.description || currentProduct.quantity === undefined) {
-      alert('Por favor, completa todos los campos obligatorios.');
-      return;
-    }
+    const name = draft.name.trim();
+    const quantity = Number(draft.quantity.replace(",", "."));
+    const price = Number(draft.price.replace(",", "."));
+
+    if (!name) return setFormError("El nombre es obligatorio");
+    if (!Number.isFinite(quantity) || quantity < 0) return setFormError("El stock no es válido");
+    if (!Number.isFinite(price) || price < 0) return setFormError("El precio no es válido");
+
+    const payload = {
+      id: draft.id,
+      name,
+      description: draft.description.trim(),
+      barcode: normalizeBarcode(draft.barcode),
+      quantity,
+      price,
+      imageUrl: draft.imageUrl.trim(),
+      stockType: draft.stockType,
+    };
 
     try {
-      if (editMode) {
-        await api.put(`/products/${currentProduct.id}`, currentProduct); // Actualizar producto
+      if (draft.id) {
+        await api.put(`/products/${draft.id}`, payload);
       } else {
-        await api.post('/products/CreateProduct', currentProduct); // Crear producto
+        await api.post("/products/CreateProduct", payload);
       }
-      loadProducts();
-      handleCloseDialog();
-      alert(editMode ? 'Producto actualizado exitosamente' : 'Producto creado exitosamente');
+      setDraft(null);
+      setFormError("");
+      setMessage(draft.id ? "Producto actualizado" : "Producto creado");
+      load();
     } catch (error) {
-      console.error('Error guardando producto:', error);
-      alert('Error al guardar el producto. Por favor, inténtalo de nuevo.');
+      setFormError(errorMessage(error, "No se pudo guardar el producto"));
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const remove = async (product: Product) => {
+    if (!window.confirm(`¿Eliminar ${product.name}?`)) return;
+
     try {
-      await api.delete(`/products/${id}`); // Eliminar producto
-      loadProducts();
+      await api.delete(`/products/${product.id}`);
+      setMessage("Producto eliminado");
+      load();
     } catch (error) {
-      console.error('Error eliminando producto:', error);
+      setMessage(errorMessage(error, "No se pudo eliminar el producto"));
     }
   };
 
-  if (!isAdmin) return <div>Acceso no autorizado</div>;
+  const update = (patch: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...patch } : d));
 
   return (
-    <Grid container spacing={3} padding={4}>
-      <Grid item xs={12}>
+    <Box sx={{ position: "relative", zIndex: 1, maxWidth: 960, mx: "auto", p: 2, pb: 6 }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
+        <Typography component="h1" variant="h4">
+          Productos
+        </Typography>
         <Button
           variant="contained"
-          color="primary"
           startIcon={<Add />}
-          onClick={handleOpenCreate}
+          onClick={() => {
+            setFormError("");
+            setDraft(EMPTY);
+          }}
         >
-          Nuevo Producto
+          Nuevo
         </Button>
-      </Grid>
+      </Box>
 
-      <Grid item xs={12}>
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Nombre</TableCell>
-                <TableCell>Descripción</TableCell>
-                <TableCell>Stock</TableCell>
-                <TableCell>Precio</TableCell>
-                <TableCell>Imagen</TableCell>
-                <TableCell>Acciones</TableCell>
+      <TableContainer component={Paper}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Nombre</TableCell>
+              <TableCell>Código</TableCell>
+              <TableCell align="right">Stock</TableCell>
+              <TableCell align="right">Precio</TableCell>
+              <TableCell />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {products.map((product) => (
+              <TableRow key={product.id}>
+                <TableCell>{product.name}</TableCell>
+                <TableCell>{product.barcode ?? ""}</TableCell>
+                <TableCell align="right">
+                  {formatQuantity(product.quantity)} {product.unitOfMeasure}
+                </TableCell>
+                <TableCell align="right">{formatMoney(product.price)}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                  <IconButton
+                    aria-label={`Editar ${product.name}`}
+                    onClick={() => {
+                      setFormError("");
+                      setDraft(toDraft(product));
+                    }}
+                  >
+                    <Edit color="primary" />
+                  </IconButton>
+                  <IconButton aria-label={`Eliminar ${product.name}`} onClick={() => remove(product)}>
+                    <Delete color="error" />
+                  </IconButton>
+                </TableCell>
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {products.map((product) => (
-                <TableRow key={product.id}>
-                  <TableCell>{product.name}</TableCell>
-                  <TableCell>{product.description}</TableCell>
-                  <TableCell>{product.quantity + ' ' + product.unitOfMeasure}</TableCell>
-                  <TableCell>{"$" + product.price}</TableCell>
-                  <TableCell>
-                    {product.imageUrl && (
-                      <img 
-                        src={product.imageUrl} 
-                        alt={product.name}
-                        style={{ width: 50, height: 50, objectFit: 'cover' }}
-                      />
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <IconButton onClick={() => handleOpenEdit(product)}>
-                      <Edit color="primary" />
-                    </IconButton>
-                    <IconButton onClick={() => product.id && handleDelete(product.id)}>
-                      <Delete color="error" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Grid>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
-      <Dialog open={openDialog} onClose={handleCloseDialog} fullWidth maxWidth="sm">
-        <DialogTitle>
-          {editMode ? 'Editar Producto' : 'Nuevo Producto'}
-        </DialogTitle>
+      <Dialog open={draft !== null} onClose={() => setDraft(null)} fullWidth maxWidth="sm">
+        <DialogTitle>{draft?.id ? "Editar producto" : "Nuevo producto"}</DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} padding={2}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Nombre"
-                value={currentProduct.name}
-                onChange={(e) => setCurrentProduct({...currentProduct, name: e.target.value})}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Descripción"
-                multiline
-                rows={3}
-                value={currentProduct.description}
-                onChange={(e) => setCurrentProduct({...currentProduct, description: e.target.value})}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Stock"
-                type="number"
-                value={currentProduct.quantity}
-                onChange={(e) => setCurrentProduct({...currentProduct, quantity: Number(e.target.value)})}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Precio"
-                type="number"
-                value={currentProduct.price}
-                onChange={(e) => setCurrentProduct({...currentProduct, price: Number(e.target.value)})}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="URL de la imagen"
-                value={currentProduct.imageUrl}
-                onChange={(e) => setCurrentProduct({...currentProduct, imageUrl: e.target.value})}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Tipo de Producto</InputLabel>
-                <Select
-                  value={currentProduct.stockType}
-                  onChange={(e) => setCurrentProduct({ ...currentProduct, stockType: Number(e.target.value) })} // Convertir a número
-                >
-                  <MenuItem value={0}>Unidades</MenuItem>
-                  <MenuItem value={1}>Kilogramos</MenuItem>
-                  <MenuItem value={2}>Litros</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
+          {formError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {formError}
+            </Alert>
+          )}
+          <Box sx={{ display: "grid", gap: 2, pt: 1 }}>
+            <TextField label="Nombre" value={draft?.name ?? ""} onChange={(e) => update({ name: e.target.value })} />
+            <TextField
+              label="Código de barras"
+              value={draft?.barcode ?? ""}
+              onChange={(e) => update({ barcode: e.target.value })}
+              slotProps={{ htmlInput: { inputMode: "numeric" } }}
+            />
+            <TextField
+              label="Descripción"
+              multiline
+              rows={2}
+              value={draft?.description ?? ""}
+              onChange={(e) => update({ description: e.target.value })}
+            />
+            <FormControl>
+              <InputLabel id="stock-type-label">Se mide en</InputLabel>
+              <Select
+                labelId="stock-type-label"
+                label="Se mide en"
+                value={draft?.stockType ?? 0}
+                onChange={(e) => update({ stockType: Number(e.target.value) })}
+              >
+                {STOCK_TYPES.map((t) => (
+                  <MenuItem key={t.value} value={t.value}>
+                    {t.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="Stock"
+              value={draft?.quantity ?? ""}
+              onChange={(e) => update({ quantity: e.target.value })}
+              slotProps={{ htmlInput: { inputMode: "decimal" } }}
+            />
+            <TextField
+              label="Precio"
+              value={draft?.price ?? ""}
+              onChange={(e) => update({ price: e.target.value })}
+              slotProps={{ htmlInput: { inputMode: "decimal" } }}
+            />
+            <TextField
+              label="URL de la imagen"
+              value={draft?.imageUrl ?? ""}
+              onChange={(e) => update({ imageUrl: e.target.value })}
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancelar</Button>
-          <Button onClick={handleSubmit} variant="contained" color="primary">
-            {editMode ? 'Guardar Cambios' : 'Crear Producto'}
+          <Button onClick={() => setDraft(null)}>Cancelar</Button>
+          <Button variant="contained" onClick={save}>
+            Guardar
           </Button>
         </DialogActions>
       </Dialog>
-    </Grid>
+
+      <Snackbar
+        open={message !== ""}
+        autoHideDuration={4000}
+        onClose={() => setMessage("")}
+        message={message}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
+    </Box>
   );
 };
 
