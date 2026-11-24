@@ -318,6 +318,9 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
   const [step, setStep] = useState<Step>("file");
   const [reading, setReading] = useState(false);
   const [fileError, setFileError] = useState("");
+  // Texto que leyó pdf.js, solo para copiarlo si la lectura falla. Vive mientras el diálogo esté abierto.
+  const [readLines, setReadLines] = useState<string[]>([]);
+  const [copyNote, setCopyNote] = useState("");
   const [statement, setStatement] = useState<AnyStatement | null>(null);
   const [cardId, setCardId] = useState<number | null>(null);
 
@@ -348,6 +351,8 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
     setStep("file");
     setReading(false);
     setFileError("");
+    setReadLines([]);
+    setCopyNote("");
     setStatement(null);
     setCardId(null);
     setDraft(null);
@@ -365,8 +370,13 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
     setNewCategoryKey(null);
   }, []);
 
+  // Al cerrar también se borra el texto leído: el componente sigue montado entre aperturas.
   useEffect(() => {
     if (open) resetAll();
+    else {
+      setReadLines([]);
+      setCopyNote("");
+    }
   }, [open, resetAll]);
 
   const selectedCard = accountCards.find((c) => c.id === cardId) ?? null;
@@ -376,10 +386,13 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
   const chooseFile = async (file: File) => {
     setReading(true);
     setFileError("");
+    setReadLines([]);
+    setCopyNote("");
     setStatement(null);
     setCardId(null);
     try {
       const lines = await extractPdfLines(file);
+      setReadLines(lines);
       const s = parseAnyStatement(lines);
       setStatement(s);
       const accounts = s.type === "debit" ? debitCards : creditCards;
@@ -393,6 +406,15 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
       );
     } finally {
       setReading(false);
+    }
+  };
+
+  const copyReadText = async () => {
+    try {
+      await navigator.clipboard.writeText(readLines.join("\n"));
+      setCopyNote("Texto copiado. Revisa que no tenga datos que no quieras compartir antes de enviarlo.");
+    } catch {
+      setCopyNote("No se pudo copiar el texto. Intenta de nuevo.");
     }
   };
 
@@ -595,6 +617,14 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
 
               {reading && <Typography sx={{ fontWeight: 700 }}>Leyendo el estado…</Typography>}
               {fileError && <Alert severity="error">{fileError}</Alert>}
+              {fileError && readLines.length > 0 && (
+                <Box>
+                  <Button variant="text" onClick={() => void copyReadText()}>
+                    Copiar texto leído
+                  </Button>
+                  {copyNote && <Typography sx={{ fontSize: 13, color: "text.secondary" }}>{copyNote}</Typography>}
+                </Box>
+              )}
 
               {statement && !reading && (
                 <>

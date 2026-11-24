@@ -1,4 +1,14 @@
-import { MASKED_TITULAR, annualRateAfterLabel, cleanMerchant, findCardLast4, parseSpanishDate } from "./banamex";
+import {
+  DATE_VALUE,
+  MASKED_TITULAR,
+  MONEY_VALUE,
+  PERIOD_VALUE,
+  annualRateAfterLabel,
+  cleanMerchant,
+  findCardLast4,
+  parseSpanishDate,
+  valueNearLabel,
+} from "./banamex";
 import type { ParsedStatement, StatementInstallment, StatementLine } from "./types";
 import { StatementParseError } from "./types";
 
@@ -22,44 +32,28 @@ const PLAN_PAYMENT = /^(\d{1,3}) DE (\d{1,3})\s+(.+)$/i;
 
 export function parseBbvaStatement(rawLines: string[]): ParsedStatement {
   const lines = rawLines.map(normalizeLine).filter((l) => l.length > 0);
-  const text = lines.join("\n");
 
   if (!isBbvaStatement(lines)) {
     throw new StatementParseError("Este PDF no parece un estado de cuenta de BBVA.");
   }
 
-  const first = (re: RegExp): string | null => {
-    for (const line of lines) {
-      const m = re.exec(line);
-      if (m) return m[1];
-    }
-    return null;
-  };
-
-  // El monto va después de la etiqueta; si el PDF lo separó en la línea anterior, se toma de ahí.
+  // El monto va después de la etiqueta, o en una línea vecina si pdf.js lo separó (ver valueNearLabel).
   const moneyAfter = (label: RegExp): number | null => {
-    const same = first(new RegExp(`(?:${label.source})\\s*\\d{0,2}\\s*${MONEY}`));
-    if (same !== null) return money(same);
-    for (let i = 1; i < lines.length; i++) {
-      if (new RegExp(`(?:${label.source})\\s*\\d{0,2}\\s*$`).test(lines[i])) {
-        const prev = new RegExp(`${MONEY}$`).exec(lines[i - 1]);
-        if (prev) return money(prev[1]);
-      }
-    }
-    return null;
+    const m = valueNearLabel(lines, label, MONEY_VALUE);
+    return m === null ? null : money(m[1]);
   };
 
   // Solo se guardan los últimos 4 dígitos del número de tarjeta. Si no aparece, se usa la tarjeta o cuenta enmascarada.
   const last4 = findCardLast4(lines, [MASKED_TITULAR, /NUMERO DE CUENTA:?\s*[X*\s]*(\d{4})\b/]);
   if (!last4) throw new StatementParseError("No encontré el número de tarjeta en el estado.");
 
-  const period = /Periodo:\s*(\d{1,2}-[a-zA-Z]{3}-\d{4})\s+al\s+(\d{1,2}-[a-zA-Z]{3}-\d{4})/i.exec(text);
+  const period = valueNearLabel(lines, /Periodo:/i, PERIOD_VALUE);
   const periodStart = period ? parseSpanishDate(period[1]) : null;
   const periodEnd = period ? parseSpanishDate(period[2]) : null;
   if (!periodStart || !periodEnd) throw new StatementParseError("No encontré el periodo del estado.");
 
-  const dueRaw = first(new RegExp(`Fecha l[íi]mite de pago:?\\s*\\d?\\s*(?:[a-zA-Záéíóú]+,\\s*)?${DATE}`, "i"));
-  const dueDate = dueRaw ? parseSpanishDate(dueRaw) : null;
+  const due = valueNearLabel(lines, /Fecha l[íi]mite de pago:?/i, DATE_VALUE);
+  const dueDate = due ? parseSpanishDate(due[1]) : null;
   if (!dueDate) throw new StatementParseError("No encontré la fecha límite de pago.");
 
   const payToAvoidInterest = moneyAfter(/Pago para no generar intereses:/);
@@ -71,7 +65,7 @@ export function parseBbvaStatement(rawLines: string[]): ParsedStatement {
   const minimumPlusInstallments = moneyAfter(/Pago m[íi]nimo \+ compras[^:$]*:/);
   const totalBalance = moneyAfter(/Saldo deudor total:/);
   const regularBalance = moneyAfter(/Saldo cargos regulares:/);
-  const installmentBalance = moneyAfter(/Saldo cargo a meses:|Saldo cargos a meses:/);
+  const installmentBalance = moneyAfter(/Saldo cargos? a meses:/);
   const creditLimit = moneyAfter(/L[íi]mite de cr[ée]dito:/);
   const availableCredit = moneyAfter(/Cr[ée]dito disponible:/);
 

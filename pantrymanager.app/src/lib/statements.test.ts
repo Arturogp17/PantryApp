@@ -5,6 +5,7 @@ import {
   firstPaymentFromStatement,
   parseBanamexStatement,
   parseSpanishDate,
+  valueNearLabel,
 } from "./statements/banamex";
 import { buildDebitDraft, buildImportDraft, debitDefaultChecked, matchExistingExpenses } from "./statements/import";
 import { isBanamexDebit, parseBanamexDebit } from "./statements/banamexDebit";
@@ -548,5 +549,73 @@ describe("importar un estado de débito", () => {
 
   test("marcado por defecto solo para compras y comisiones", () => {
     expect(debit.movements.map(debitDefaultChecked)).toEqual([true, false, false, false, true, false, true]);
+  });
+});
+
+const MONEY_RE = /\$\s*([\d,]+\.\d{2})/;
+
+describe("valueNearLabel", () => {
+  test("toma primero el valor de la misma línea", () => {
+    expect(valueNearLabel(["Pago mínimo:4 $200.00", "$300.00"], /Pago m[íi]nimo:/, MONEY_RE)?.[1]).toBe("200.00");
+  });
+
+  test("prueba i-1 antes que i+1", () => {
+    expect(valueNearLabel(["$100.00", "Etiqueta de prueba:", "$200.00"], /Etiqueta de prueba:/, MONEY_RE)?.[1]).toBe("100.00");
+  });
+
+  test("respeta la ventana de líneas", () => {
+    const lines = ["Etiqueta de prueba:", "texto", "otro", "$5.00"];
+    expect(valueNearLabel(lines, /Etiqueta de prueba:/, MONEY_RE)).toBeNull();
+    expect(valueNearLabel(lines, /Etiqueta de prueba:/, MONEY_RE, 3)?.[1]).toBe("5.00");
+  });
+
+  test("en una línea vecina toma el monto más a la derecha", () => {
+    expect(valueNearLabel(["$10.00   $20.00", "Etiqueta de prueba:"], /Etiqueta de prueba:/, MONEY_RE)?.[1]).toBe("20.00");
+  });
+
+  test("una línea vecina con otra etiqueta del resumen no aporta valor", () => {
+    expect(valueNearLabel(["Pago mínimo:4", "Saldo deudor total:11 $2,200.00"], /Pago m[íi]nimo:/, MONEY_RE)).toBeNull();
+  });
+
+  test("el texto de la misma línea se corta en la siguiente etiqueta", () => {
+    const line = ["Límite de crédito: Crédito disponible: $47,800.00"];
+    expect(valueNearLabel(line, /L[íi]mite de cr[ée]dito:/, MONEY_RE)).toBeNull();
+    expect(valueNearLabel(line, /Cr[ée]dito disponible:/, MONEY_RE)?.[1]).toBe("47,800.00");
+  });
+
+  test("una etiqueta en mayúsculas sin acentos coincide con la línea acentuada", () => {
+    const m = valueNearLabel(["NÚMERO DE TARJETA: 4000 1111 2222 3333"], /NUMERO DE TARJETA:?/, /(\d{4})\s*$/);
+    expect(m?.[1]).toBe("3333");
+  });
+});
+
+// Estado de BBVA con las líneas partidas como las deja pdf.js: la fecha, el monto o la etiqueta caen en otra línea.
+describe("estado de BBVA con valores en líneas distintas a su etiqueta", () => {
+  test("la fecha límite va en la línea anterior a la etiqueta", () => {
+    const lines = BBVA_SAMPLE.flatMap((l) =>
+      l.startsWith("Fecha límite de pago:") ? ["lunes, 23-nov-2026", "Fecha límite de pago:1"] : [l]
+    );
+    expect(parseBbvaStatement(lines).dueDate).toBe("2026-11-23");
+  });
+
+  test("el monto va en la línea siguiente a su etiqueta", () => {
+    const lines = BBVA_SAMPLE.flatMap((l) =>
+      l.includes("Pago para no generar intereses:2 $1,000.00")
+        ? ["TARJETA AZUL BBVA (CLASICA)", "Pago para no generar intereses:2", "$1,000.00"]
+        : [l]
+    );
+    expect(parseBbvaStatement(lines).payToAvoidInterest).toBe(1000);
+  });
+
+  test("el periodo va en la línea siguiente a su etiqueta", () => {
+    const lines = BBVA_SAMPLE.flatMap((l) =>
+      l.startsWith("Periodo:") ? ["Periodo:", "02-oct-2026 al 01-nov-2026"] : [l]
+    );
+    expect(parseBbvaStatement(lines).periodEnd).toBe("2026-11-01");
+  });
+
+  test("no toma el monto de una etiqueta vecina (pago mínimo + compras, saldo cargos regulares)", () => {
+    const lines = BBVA_SAMPLE.map((l) => (l === "Pago mínimo:4 $200.00" ? "Pago mínimo:4" : l));
+    expect(() => parseBbvaStatement(lines)).toThrow(StatementParseError);
   });
 });

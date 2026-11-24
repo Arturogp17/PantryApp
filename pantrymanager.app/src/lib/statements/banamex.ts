@@ -58,6 +58,95 @@ export function findCardLast4(lines: string[], fallbacks: RegExp[] = []): string
 // "Tarjeta titular: XXXXXXXXXXXX5947": solo los últimos 4 dígitos tras las X.
 export const MASKED_TITULAR = /TARJETA TITULAR:?\s*[X*\s]*(\d{4})\b/;
 
+// Valores del resumen. Los grupos son lo que interesa: el monto sin "$", la fecha, o las dos fechas del periodo.
+export const MONEY_VALUE = /\$\s*([\d,]+\.\d{2})/;
+export const DATE_VALUE = /(\d{1,2}-[a-zA-Z]{3}-\d{4})/;
+export const PERIOD_VALUE = /(\d{1,2}-[a-zA-Z]{3}-\d{4})\s+al\s+(\d{1,2}-[a-zA-Z]{3}-\d{4})/i;
+
+// Etiquetas del resumen. Sirven para cortar el texto de una etiqueta antes de la siguiente
+// y para no tomar el valor de una línea vecina que ya es de otra etiqueta.
+const SUMMARY_LABELS: RegExp[] = [
+  /Fecha l[íi]mite de pago:?/i,
+  /Periodo:/i,
+  /Pago para no generar intereses:/i,
+  /Pago m[íi]nimo \+ compras[^:$]*:/i,
+  /Pago m[íi]nimo:/i,
+  /Saldo deudor total:/i,
+  /Saldo cargos? regulares?:/i,
+  /Saldo cargos? a meses:/i,
+  /L[íi]mite de cr[ée]dito:/i,
+  /Cr[ée]dito disponible:/i,
+  /N[úu]mero de tarjeta:/i,
+  /Tarjeta titular:/i,
+  /TASA DE INTER[ÉE]S ANUAL/i,
+];
+
+// Criterio de la etiqueta: si está escrita en mayúsculas y sin acentos (por ejemplo "NUMERO DE TARJETA"),
+// se busca en fold(línea), así coincide aunque el PDF la traiga con acentos o en minúsculas.
+// Cualquier otra etiqueta (con minúsculas o acentos en la expresión) se busca tal cual.
+const isFoldedLabel = (label: RegExp): boolean => {
+  const src = label.source.replace(/\\./g, "");
+  return !/[a-zñ]/.test(src) && !/[^ -~]/.test(src);
+};
+
+// Otra etiqueta del resumen en la línea, distinta de la buscada. Acepta la línea tal cual y sin acentos.
+const hasOtherLabel = (line: string, label: RegExp): boolean =>
+  SUMMARY_LABELS.some((k) => k.source !== label.source && (k.test(line) || k.test(fold(line))));
+
+// Posición donde empieza la siguiente etiqueta del resumen (distinta de la buscada), desde "from". Si no hay, el final del texto.
+function nextOtherLabel(text: string, from: number, label: RegExp): number {
+  let end = text.length;
+  for (const k of SUMMARY_LABELS) {
+    if (k.source === label.source) continue;
+    const g = new RegExp(k.source, "gi");
+    g.lastIndex = from;
+    const m = g.exec(text);
+    if (m && m.index < end) end = m.index;
+  }
+  return end;
+}
+
+// Última coincidencia de una expresión global en el texto. Con varios montos en una línea, es la columna de valores.
+function lastMatch(re: RegExp, text: string): RegExpExecArray | null {
+  let last: RegExpExecArray | null = null;
+  re.lastIndex = 0;
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) last = m;
+  return last;
+}
+
+// Busca el valor de una etiqueta cuando el PDF la separa de su valor (pdf.js pone líneas distintas
+// si la etiqueta y el valor tienen tamaños de letra distintos). Orden:
+// 1) El texto que sigue a la etiqueta en su misma línea, hasta la siguiente etiqueta del resumen. Gana la primera coincidencia.
+// 2) Las líneas vecinas en el orden i-1, i+1, i-2, i+2, hasta "window". Una línea vecina se descarta si tiene otra etiqueta del resumen.
+//    De esa línea se toma la coincidencia más a la derecha.
+// Las coincidencias de la misma línea son relativas al texto buscado, no a la línea completa.
+// Si la etiqueta se buscó en fold(línea), el resultado de la misma línea viene en mayúsculas y sin acentos.
+export function valueNearLabel(lines: string[], label: RegExp, value: RegExp, window = 2): RegExpExecArray | null {
+  const labelRe = new RegExp(label.source, label.flags.replace(/[gy]/g, ""));
+  const valueRe = new RegExp(value.source, value.flags.replace(/[gy]/g, ""));
+  const valueAll = new RegExp(value.source, valueRe.flags + "g");
+  const folded = isFoldedLabel(label);
+
+  for (let i = 0; i < lines.length; i++) {
+    const hay = folded ? fold(lines[i]) : lines[i];
+    const hit = labelRe.exec(hay);
+    if (!hit) continue;
+
+    const start = hit.index + hit[0].length;
+    const same = valueRe.exec(hay.slice(start, nextOtherLabel(hay, start, label)));
+    if (same) return same;
+
+    for (let d = 1; d <= window; d++) {
+      for (const j of [i - d, i + d]) {
+        if (j < 0 || j >= lines.length || hasOtherLabel(lines[j], label)) continue;
+        const near = lastMatch(valueAll, lines[j]);
+        if (near) return near;
+      }
+    }
+  }
+  return null;
+}
+
 // Tasa anual del estado: la etiqueta "TASA DE INTERES ANUAL" va en una línea y el valor en las siguientes,
 // en una línea con "Sin IVA" que termina con la tasa (por ejemplo "71.5% Sin IVA 55.52%"). Se toma el último porcentaje.
 export function annualRateAfterLabel(lines: string[]): number | null {
@@ -84,30 +173,22 @@ export function parseBanamexStatement(rawLines: string[]): ParsedStatement {
     throw new StatementParseError("Este PDF no parece un estado de cuenta de Banamex.");
   }
 
-  const first = (re: RegExp): string | null => {
-    for (const line of lines) {
-      const m = re.exec(line);
-      if (m) return m[1];
-    }
-    return null;
-  };
-
   const moneyAfter = (label: RegExp): number | null => {
-    const v = first(new RegExp(`${label.source}\\s*\\d{0,2}\\s*${MONEY}`));
-    return v === null ? null : money(v);
+    const m = valueNearLabel(lines, label, MONEY_VALUE);
+    return m === null ? null : money(m[1]);
   };
 
   // Solo se guardan los últimos 4 dígitos del número de tarjeta.
   const last4 = findCardLast4(lines, [MASKED_TITULAR]);
   if (!last4) throw new StatementParseError("No encontré el número de tarjeta en el estado.");
 
-  const period = /Periodo:\s*(\d{1,2}-[a-zA-Z]{3}-\d{4})\s+al\s+(\d{1,2}-[a-zA-Z]{3}-\d{4})/i.exec(text);
+  const period = valueNearLabel(lines, /Periodo:/i, PERIOD_VALUE);
   const periodStart = period ? parseSpanishDate(period[1]) : null;
   const periodEnd = period ? parseSpanishDate(period[2]) : null;
   if (!periodStart || !periodEnd) throw new StatementParseError("No encontré el periodo del estado.");
 
-  const dueRaw = first(new RegExp(`Fecha l[íi]mite de pago:?\\s*\\d?\\s*(?:[a-zA-Záéíóú]+,\\s*)?${DATE}`, "i"));
-  const dueDate = dueRaw ? parseSpanishDate(dueRaw) : null;
+  const due = valueNearLabel(lines, /Fecha l[íi]mite de pago:?/i, DATE_VALUE);
+  const dueDate = due ? parseSpanishDate(due[1]) : null;
   if (!dueDate) throw new StatementParseError("No encontré la fecha límite de pago.");
 
   const payToAvoidInterest = moneyAfter(/Pago para no generar intereses:/);
