@@ -77,6 +77,9 @@ namespace PantryManager.API.Models
         public string? Name { get; set; }
         public decimal TotalAmount { get; set; }
         public int Months { get; set; }
+        // Mensualidad fija y tasa anual (%) de un plan con intereses. Opcionales.
+        public decimal? MonthlyPayment { get; set; }
+        public decimal? InterestRate { get; set; }
         public DateOnly FirstPaymentDate { get; set; }
         public int? CategoryId { get; set; }
         public string? Note { get; set; }

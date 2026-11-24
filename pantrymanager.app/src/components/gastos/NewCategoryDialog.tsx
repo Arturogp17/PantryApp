@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+  Typography,
+} from "@mui/material";
 import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { ExpenseCategory } from "../../types";
@@ -8,6 +19,7 @@ import { errorMessage } from "../../lib/errors";
 interface Props {
   open: boolean;
   // Null crea una categoría principal; una categoría crea una subcategoría de esa.
+  // Es la elección inicial: el usuario puede cambiarla en el diálogo.
   parent: ExpenseCategory | null;
   categories: ExpenseCategory[];
   onClose: () => void;
@@ -22,6 +34,8 @@ const NewCategoryDialog = ({ open, parent, categories, onClose, onCreated }: Pro
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Principal elegida en "Dentro de"; null significa categoría principal.
+  const [chosenId, setChosenId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -29,9 +43,15 @@ const NewCategoryDialog = ({ open, parent, categories, onClose, onCreated }: Pro
     setTouched(false);
     setSaving(false);
     setError("");
+    setChosenId(parent?.id ?? null);
   }, [open]);
 
-  const parentId = parent?.id ?? null;
+  const topLevel = categories
+    .filter((c) => c.parentId === null)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const chosen = topLevel.find((c) => c.id === chosenId) ?? null;
+  const parentId = chosen?.id ?? null;
+
   const emptyError = name.trim().length === 0;
   // Se compara con las del mismo nivel: principales entre sí, o subcategorías de la misma principal.
   const repeatError =
@@ -65,11 +85,11 @@ const NewCategoryDialog = ({ open, parent, categories, onClose, onCreated }: Pro
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
-      <DialogTitle>{parent ? `Nueva subcategoría de ${parent.name}` : "Nueva categoría"}</DialogTitle>
+      <DialogTitle>{chosen ? `Nueva subcategoría de ${chosen.name}` : "Nueva categoría"}</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
           <TextField
-            label={parent ? "Nombre de la subcategoría" : "Nombre de la categoría"}
+            label={chosen ? "Nombre de la subcategoría" : "Nombre de la categoría"}
             value={name}
             autoFocus
             onChange={(e) => setName(e.target.value)}
@@ -80,6 +100,30 @@ const NewCategoryDialog = ({ open, parent, categories, onClose, onCreated }: Pro
             helperText={helper}
             slotProps={{ htmlInput: { maxLength: 60 } }}
           />
+          <Box>
+            <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1 }}>Dentro de</Typography>
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+              <Chip
+                label="Ninguna (categoría principal)"
+                clickable
+                color={chosenId === null ? "primary" : "default"}
+                variant={chosenId === null ? "filled" : "outlined"}
+                onClick={() => setChosenId(null)}
+                sx={{ height: 44 }}
+              />
+              {topLevel.map((c) => (
+                <Chip
+                  key={c.id}
+                  label={c.name}
+                  clickable
+                  color={chosenId === c.id ? "primary" : "default"}
+                  variant={chosenId === c.id ? "filled" : "outlined"}
+                  onClick={() => setChosenId(c.id)}
+                  sx={{ height: 44 }}
+                />
+              ))}
+            </Box>
+          </Box>
           {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </DialogContent>

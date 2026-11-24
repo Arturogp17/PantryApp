@@ -3,7 +3,8 @@ using System.Collections.Generic;
 
 namespace PantryManager.API.Models
 {
-    // Meses sin intereses: una compra a plazos que se paga en "Months" cargos a una tarjeta de crédito.
+    // Compra a plazos que se paga en "Months" cargos a una tarjeta de crédito: meses sin intereses,
+    // o con intereses si MonthlyPayment tiene valor.
     // Los pagos son "comprometido": no cuentan en los totales de Gastos.
     public class InstallmentPlan
     {
@@ -13,6 +14,10 @@ namespace PantryManager.API.Models
         public Card Card { get; set; } = null!;
         public decimal TotalAmount { get; set; }
         public int Months { get; set; }
+        // Mensualidad fija de un plan con intereses. Null en meses sin intereses.
+        public decimal? MonthlyPayment { get; set; }
+        // Tasa anual en porcentaje (45 = 45 %). Informativa: no cambia el cálculo.
+        public decimal? InterestRate { get; set; }
         // El pago i (base 0) vence en FirstPaymentDate.AddMonths(i).
         public DateOnly FirstPaymentDate { get; set; }
         public int? CategoryId { get; set; }
@@ -52,6 +57,9 @@ namespace PantryManager.API.Models
         public string CardColor { get; set; } = "";
         public decimal TotalAmount { get; set; }
         public int Months { get; set; }
+        public decimal? MonthlyPayment { get; set; }
+        public decimal? InterestRate { get; set; }
+        public decimal TotalToPay { get; set; }
         public decimal MonthlyAmount { get; set; }
         public DateOnly FirstPaymentDate { get; set; }
         public int? CategoryId { get; set; }
@@ -68,6 +76,8 @@ namespace PantryManager.API.Models
         public int? CardId { get; set; }
         public decimal TotalAmount { get; set; }
         public int Months { get; set; }
+        public decimal? MonthlyPayment { get; set; }
+        public decimal? InterestRate { get; set; }
         public DateOnly? FirstPaymentDate { get; set; }
         public int? CategoryId { get; set; }
         public string? Note { get; set; }

@@ -8,13 +8,23 @@ namespace PantryManager.API.Services
         // Hora de México (UTC-6), la misma que usan los demás endpoints.
         public static DateOnly TodayInMexico() => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-6));
 
-        // Pago normal: total / meses, redondeado a centavos.
-        public static decimal MonthlyAmount(decimal total, int months) =>
-            Math.Round(total / months, 2, MidpointRounding.AwayFromZero);
-
-        // Monto del pago "index" (base 0). El último pago absorbe la diferencia de redondeo.
-        public static decimal PaymentAmount(decimal total, int months, int index)
+        // Si el plan tiene mensualidad fija (planes con intereses), todas valen esa cantidad.
+        // Si no, es total / meses redondeado a centavos (meses sin intereses).
+        public static decimal MonthlyAmount(decimal total, int months, decimal? monthlyPayment = null)
         {
+            if (monthlyPayment.HasValue) return monthlyPayment.Value;
+            return Math.Round(total / months, 2, MidpointRounding.AwayFromZero);
+        }
+
+        // Total a pagar: con mensualidad fija, MonthlyPayment × Months; si no, el monto original.
+        public static decimal TotalToPay(decimal total, int months, decimal? monthlyPayment = null) =>
+            monthlyPayment.HasValue ? monthlyPayment.Value * months : total;
+
+        // Monto del pago "index" (base 0). Sin mensualidad fija, el último pago absorbe la diferencia de redondeo.
+        public static decimal PaymentAmount(decimal total, int months, int index, decimal? monthlyPayment = null)
+        {
+            if (monthlyPayment.HasValue) return monthlyPayment.Value;
+
             var monthly = MonthlyAmount(total, months);
             return index == months - 1 ? total - monthly * (months - 1) : monthly;
         }

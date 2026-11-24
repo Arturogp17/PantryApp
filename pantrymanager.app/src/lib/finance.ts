@@ -1,5 +1,5 @@
 import type { Card, IncomeSource, InstallmentPlan, RecurringCharge, StatementSummary } from "../types";
-import { shiftDays } from "./expenses";
+import { installmentAmount, shiftDays } from "./expenses";
 import { roundMoney as r } from "./money";
 
 // Cobro de un ingreso en una fecha concreta.
@@ -415,7 +415,7 @@ export function installmentReleases(plans: InstallmentPlan[], today: string): Re
       name: p.name,
       cardId: p.cardId,
       lastPaymentDate,
-      monthly: r(p.totalAmount / p.months),
+      monthly: installmentAmount(p, 0),
       remainingPayments,
     });
   }

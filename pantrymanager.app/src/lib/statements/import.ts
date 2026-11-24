@@ -23,6 +23,10 @@ export interface InstallmentDraft {
   paidCount: number;
   pendingBalance: number;
   monthlyAmount: number;
+  // Mensualidad fija con intereses; null en meses sin intereses.
+  monthlyPayment: number | null;
+  // Tasa anual en porcentaje; null en meses sin intereses.
+  interestRate: number | null;
 }
 
 export interface ImportDraft {
@@ -74,12 +78,12 @@ export function buildImportDraft(statement: ParsedStatement): ImportDraft {
   const installments: InstallmentDraft[] = [];
   const skippedInstallments: { name: string; reason: string }[] = [];
   for (const p of statement.installments) {
-    if (p.withInterest) {
-      skippedInstallments.push({ name: p.merchant, reason: "Es un plan con intereses; la app solo maneja meses sin intereses" });
+    if (p.totalPayments < 2) {
+      skippedInstallments.push({ name: p.merchant, reason: "Tiene menos de dos mensualidades" });
       continue;
     }
-    if (p.pendingBalance <= 0 || p.paymentNumber >= p.totalPayments) {
-      skippedInstallments.push({ name: p.merchant, reason: "Ya está pagado por completo" });
+    if (p.pendingBalance <= 0 && p.paymentNumber < p.totalPayments) {
+      skippedInstallments.push({ name: p.merchant, reason: "El saldo ya está en cero antes de la última mensualidad" });
       continue;
     }
     installments.push({
@@ -92,6 +96,8 @@ export function buildImportDraft(statement: ParsedStatement): ImportDraft {
       paidCount: p.paymentNumber,
       pendingBalance: p.pendingBalance,
       monthlyAmount: p.requiredPayment,
+      monthlyPayment: p.withInterest ? p.requiredPayment : null,
+      interestRate: p.withInterest ? p.interestRate : null,
     });
   }
 

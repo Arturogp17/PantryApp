@@ -12,6 +12,7 @@ import { parseStatement } from "./statements/parse";
 import { suggestCategoryId } from "./statements/categorize";
 import { piecesToLines } from "./statements/pdfText";
 import { StatementParseError } from "./statements/types";
+import type { ParsedStatement, StatementInstallment } from "./statements/types";
 
 // Estado de ejemplo con datos inventados, con la misma estructura que uno de Banamex.
 const SAMPLE = `
@@ -155,16 +156,41 @@ describe("importar un estado", () => {
     expect(draft.skippedLineCount).toBe(2);
   });
 
-  test("importa el plan sin intereses y salta el plan con intereses", () => {
-    expect(draft.installments).toHaveLength(1);
+  test("importa el plan sin intereses y el plan con intereses en su última mensualidad", () => {
+    expect(draft.installments).toHaveLength(2);
     expect(draft.installments[0]).toMatchObject({
       name: "TIENDA UNO",
       totalAmount: 900,
       months: 3,
       paidCount: 1,
       firstPaymentDate: "2026-11-18",
+      monthlyPayment: null,
+      interestRate: null,
     });
-    expect(draft.skippedInstallments).toHaveLength(1);
+    expect(draft.installments[1]).toMatchObject({
+      name: "PRESTAMO",
+      totalAmount: 5000,
+      months: 12,
+      paidCount: 12,
+      pendingBalance: 0,
+      monthlyAmount: 400,
+      monthlyPayment: 400,
+      interestRate: 45,
+    });
+    expect(draft.skippedInstallments).toHaveLength(0);
+  });
+
+  test("descarta solo el plan de una sola mensualidad o el saldo en cero antes de la última", () => {
+    const base = statement.installments[0];
+    const plans: StatementInstallment[] = [
+      { ...base, merchant: "UNA SOLA", totalPayments: 1, paymentNumber: 1, pendingBalance: 100 },
+      { ...base, merchant: "CERO ANTES", totalPayments: 4, paymentNumber: 2, pendingBalance: 0 },
+      { ...base, merchant: "ULTIMA CERO", totalPayments: 4, paymentNumber: 4, pendingBalance: 0 },
+    ];
+    const fake: ParsedStatement = { ...statement, installments: plans };
+    const result = buildImportDraft(fake);
+    expect(result.installments.map((p) => p.name)).toEqual(["ULTIMA CERO"]);
+    expect(result.skippedInstallments.map((s) => s.name)).toEqual(["UNA SOLA", "CERO ANTES"]);
   });
 
   test("las claves de importación no se repiten", () => {
@@ -311,5 +337,18 @@ describe("tasa anual de interés", () => {
     ]);
     expect(withRate.annualRate).toBe(55.52);
     expect(parseBanamexStatement(SAMPLE).annualRate).toBeNull();
+  });
+});
+
+describe("tasa anual con el orden de líneas de pdf.js", () => {
+  test("encuentra la tasa aunque haya otras líneas entre la etiqueta y el valor", () => {
+    const lines = [
+      "Pagos y abonos - $1,000.00 TASA DE INTERES ANUAL CAT: 10",
+      "ORDINARIA VARIABLE",
+      "PAGO PARA NO GENERAR",
+      "= $2,000.00",
+      "INTERESES 2 71.5% Sin IVA 55.52%",
+    ];
+    expect(annualRateAfterLabel(lines)).toBe(55.52);
   });
 });

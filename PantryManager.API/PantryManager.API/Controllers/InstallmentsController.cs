@@ -90,6 +90,12 @@ namespace PantryManager.API.Controllers
 
             if (request.Months < 2 || request.Months > 60) return "Los meses deben estar entre 2 y 60";
 
+            if (request.MonthlyPayment.HasValue
+                && (request.MonthlyPayment.Value <= 0 || request.MonthlyPayment.Value > 99999999))
+                return "La mensualidad debe ser mayor a 0 y menor a 99999999";
+            if (request.InterestRate.HasValue && (request.InterestRate.Value < 0 || request.InterestRate.Value > 500))
+                return "La tasa de interés debe estar entre 0 y 500";
+
             // Al editar no se pone una fecha por defecto: una fecha omitida no debe mover el cronograma.
             if (!request.FirstPaymentDate.HasValue) return "Indica la fecha del primer pago";
 
@@ -108,6 +114,12 @@ namespace PantryManager.API.Controllers
             plan.Name = name;
             plan.TotalAmount = Math.Round(request.TotalAmount, 2, MidpointRounding.AwayFromZero);
             plan.Months = request.Months;
+            plan.MonthlyPayment = request.MonthlyPayment.HasValue
+                ? Math.Round(request.MonthlyPayment.Value, 2, MidpointRounding.AwayFromZero)
+                : null;
+            plan.InterestRate = request.InterestRate.HasValue
+                ? Math.Round(request.InterestRate.Value, 4, MidpointRounding.AwayFromZero)
+                : null;
             plan.FirstPaymentDate = request.FirstPaymentDate.Value;
             plan.CardId = request.CardId.Value;
             plan.CategoryId = request.CategoryId;
@@ -130,8 +142,10 @@ namespace PantryManager.API.Controllers
             var paidAmount = 0m;
             for (var i = 0; i < paidCount; i++)
             {
-                paidAmount += InstallmentSchedule.PaymentAmount(p.TotalAmount, p.Months, i);
+                paidAmount += InstallmentSchedule.PaymentAmount(p.TotalAmount, p.Months, i, p.MonthlyPayment);
             }
+
+            var totalToPay = InstallmentSchedule.TotalToPay(p.TotalAmount, p.Months, p.MonthlyPayment);
 
             return new InstallmentDto
             {
@@ -142,12 +156,15 @@ namespace PantryManager.API.Controllers
                 CardColor = p.Card.Color,
                 TotalAmount = p.TotalAmount,
                 Months = p.Months,
-                MonthlyAmount = InstallmentSchedule.MonthlyAmount(p.TotalAmount, p.Months),
+                MonthlyPayment = p.MonthlyPayment,
+                InterestRate = p.InterestRate,
+                TotalToPay = totalToPay,
+                MonthlyAmount = InstallmentSchedule.MonthlyAmount(p.TotalAmount, p.Months, p.MonthlyPayment),
                 FirstPaymentDate = p.FirstPaymentDate,
                 CategoryId = p.CategoryId,
                 Note = p.Note,
                 PaidCount = paidCount,
-                RemainingAmount = p.TotalAmount - paidAmount,
+                RemainingAmount = totalToPay - paidAmount,
                 LastPaymentDate = InstallmentSchedule.PaymentDate(p.FirstPaymentDate, p.Months - 1),
                 IsFinished = paidCount == p.Months
             };

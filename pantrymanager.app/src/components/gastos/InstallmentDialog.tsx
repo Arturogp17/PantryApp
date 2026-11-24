@@ -8,7 +8,9 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   MenuItem,
+  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -16,7 +18,7 @@ import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, ExpenseCategory, InstallmentInput, InstallmentPlan } from "../../types";
 import { errorMessage } from "../../lib/errors";
-import { todayKey } from "../../lib/expenses";
+import { installmentAmount, todayKey } from "../../lib/expenses";
 import { formatMoney, roundMoney } from "../../lib/money";
 import { Dot } from "./charts";
 import NewCategoryDialog from "./NewCategoryDialog";
@@ -48,6 +50,9 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved, on
   const [categoryText, setCategoryText] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [hasInterest, setHasInterest] = useState(false);
+  const [monthlyText, setMonthlyText] = useState("");
+  const [rateText, setRateText] = useState("");
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -67,6 +72,9 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved, on
     setFirstDate(plan?.firstPaymentDate ?? todayKey());
     setCategoryText(plan?.categoryId != null ? String(plan.categoryId) : "");
     setNote(plan?.note ?? "");
+    setHasInterest(plan != null && (plan.monthlyPayment != null || plan.interestRate != null));
+    setMonthlyText(plan?.monthlyPayment != null ? String(plan.monthlyPayment) : "");
+    setRateText(plan?.interestRate != null ? String(plan.interestRate) : "");
   }, [open, plan]);
 
   const categoryName = (c: ExpenseCategory): string => {
@@ -85,8 +93,18 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved, on
   const totalError = !(totalValue > 0);
   const monthsError = !monthsValid;
   const dateError = !/^\d{4}-\d{2}-\d{2}$/.test(firstDate);
-  const invalid = nameError || cardError || totalError || monthsError || dateError;
-  const perMonth = monthsValid && totalValue > 0 ? roundMoney(totalValue / monthsValue) : null;
+  const monthlyValue = toNumber(monthlyText);
+  const rateValue = toNumber(rateText);
+  const monthlyError = hasInterest && !(monthlyValue > 0);
+  const rateError = hasInterest && !(rateValue > 0);
+  const invalid = nameError || cardError || totalError || monthsError || dateError || monthlyError || rateError;
+  const perMonth =
+    monthsValid && totalValue > 0 && (!hasInterest || monthlyValue > 0)
+      ? installmentAmount(
+          { totalAmount: totalValue, months: monthsValue, monthlyPayment: hasInterest ? monthlyValue : null },
+          0
+        )
+      : null;
 
   const submit = async () => {
     setTouched(true);
@@ -100,6 +118,8 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved, on
       firstPaymentDate: firstDate,
       categoryId: categoryText ? Number(categoryText) : null,
       note: note.trim() || null,
+      monthlyPayment: hasInterest ? roundMoney(monthlyValue) : null,
+      interestRate: hasInterest ? rateValue : null,
     };
 
     setSaving(true);
@@ -216,6 +236,34 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved, on
               {perMonth !== null ? `${monthsValue} mensualidades de ${formatMoney(perMonth)}` : " "}
             </Typography>
           </Box>
+
+          <FormControlLabel
+            control={<Switch checked={hasInterest} onChange={(e) => setHasInterest(e.target.checked)} />}
+            label="Tiene intereses"
+          />
+
+          {hasInterest && (
+            <Box sx={{ display: "flex", gap: 2 }}>
+              <TextField
+                label="Mensualidad"
+                value={monthlyText}
+                onChange={(e) => setMonthlyText(e.target.value)}
+                error={touched && monthlyError}
+                helperText={touched && monthlyError ? "Escribe un monto mayor a 0" : " "}
+                slotProps={{ htmlInput: { inputMode: "decimal", "aria-label": "Mensualidad en pesos" } }}
+                sx={{ flex: 1 }}
+              />
+              <TextField
+                label="Tasa anual (%)"
+                value={rateText}
+                onChange={(e) => setRateText(e.target.value)}
+                error={touched && rateError}
+                helperText={touched && rateError ? "Escribe una tasa mayor a 0" : " "}
+                slotProps={{ htmlInput: { inputMode: "decimal" } }}
+                sx={{ flex: 1 }}
+              />
+            </Box>
+          )}
 
           <TextField
             label="Fecha del primer pago"

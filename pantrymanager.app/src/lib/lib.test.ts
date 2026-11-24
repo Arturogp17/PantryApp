@@ -11,6 +11,7 @@ import {
   dayMonthLabel,
   daysUntil,
   donutGradient,
+  installmentAmount,
   lastForMerchant,
   monthRange,
   shiftDays,
@@ -515,5 +516,27 @@ describe("gastos: fechas de estados de cuenta", () => {
   test("etiquetas de fecha corta y con año", () => {
     expect(dayMonthLabel("2026-12-08")).toBe("8 dic");
     expect(dateLabel("2026-11-18")).toBe("18 nov 2026");
+  });
+});
+
+describe("gastos: mensualidad de un plan", () => {
+  const plan = { totalAmount: 1000, months: 3, monthlyPayment: null as number | null };
+
+  test("sin monthlyPayment es total / meses, redondeado a centavos", () => {
+    expect(installmentAmount(plan, 0)).toBe(333.33);
+    expect(installmentAmount({ ...plan, totalAmount: 900, months: 3 }, 2)).toBe(300);
+  });
+
+  test("con monthlyPayment cada mensualidad es esa cantidad, aunque no sea total / meses", () => {
+    const loan = { totalAmount: 5000, months: 12, monthlyPayment: 400 };
+    expect(installmentAmount(loan, 0)).toBe(400);
+    expect(installmentAmount(loan, 11)).toBe(400);
+    expect(loan.totalAmount / loan.months).not.toBe(400);
+  });
+
+  test("fuera de 0..months-1 no hay mensualidad", () => {
+    expect(installmentAmount(plan, -1)).toBe(0);
+    expect(installmentAmount(plan, 3)).toBe(0);
+    expect(installmentAmount({ totalAmount: 100, months: 0, monthlyPayment: null }, 0)).toBe(0);
   });
 });

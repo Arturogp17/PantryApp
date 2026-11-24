@@ -118,6 +118,8 @@ namespace PantryManager.API.Data
             // con registros no se pueden borrar (Restrict).
             modelBuilder.Entity<InstallmentPlan>().Property(p => p.Name).HasMaxLength(120);
             modelBuilder.Entity<InstallmentPlan>().Property(p => p.TotalAmount).HasPrecision(18, 2);
+            modelBuilder.Entity<InstallmentPlan>().Property(p => p.MonthlyPayment).HasPrecision(18, 2);
+            modelBuilder.Entity<InstallmentPlan>().Property(p => p.InterestRate).HasPrecision(9, 4);
             modelBuilder.Entity<InstallmentPlan>().Property(p => p.Note).HasMaxLength(300);
             modelBuilder.Entity<InstallmentPlan>().Property(p => p.CreatedBy).HasMaxLength(60);
             modelBuilder.Entity<InstallmentPlan>()

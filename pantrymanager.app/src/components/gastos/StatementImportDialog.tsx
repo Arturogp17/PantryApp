@@ -482,6 +482,8 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
       firstPaymentDate: p.firstPaymentDate,
       categoryId: null,
       note: null,
+      monthlyPayment: p.monthlyPayment,
+      interestRate: p.interestRate,
     }));
 
     const body: StatementImportRequest = {
@@ -640,6 +642,11 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
                         <Typography sx={{ fontSize: 13, color: "text.secondary" }}>
                           {`mensualidad ${formatMoney(p.monthlyAmount)} · faltan ${formatMoney(p.pendingBalance)}`}
                         </Typography>
+                        {p.interestRate !== null && (
+                          <Typography sx={{ fontSize: 13, fontWeight: 700, color: "warning.dark" }}>
+                            {`con intereses, ${p.interestRate} % anual`}
+                          </Typography>
+                        )}
                       </Box>
                     </Box>
                   );

@@ -218,6 +218,10 @@ export interface InstallmentPlan {
   remainingAmount: number;
   lastPaymentDate: string;
   isFinished: boolean;
+  // Mensualidad fija con intereses. Null: la mensualidad es totalAmount / months.
+  monthlyPayment: number | null;
+  // Tasa anual en porcentaje (45 = 45 %). Null si el plan no tiene intereses.
+  interestRate: number | null;
 }
 
 // Cuerpo de POST /installments y PUT /installments/{id}
@@ -229,6 +233,8 @@ export interface InstallmentInput {
   firstPaymentDate: string;
   categoryId: number | null;
   note: string | null;
+  monthlyPayment: number | null;
+  interestRate: number | null;
 }
 
 // Renglón de GET /recurring
@@ -325,6 +331,8 @@ export interface StatementImportRequest {
     firstPaymentDate: string;
     categoryId: number | null;
     note: string | null;
+    monthlyPayment: number | null;
+    interestRate: number | null;
   }[];
   expenses: {
     importKey: string;

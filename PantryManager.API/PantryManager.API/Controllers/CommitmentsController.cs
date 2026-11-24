@@ -60,7 +60,7 @@ namespace PantryManager.API.Controllers
                     var index = InstallmentSchedule.PaymentIndexInMonth(plan.FirstPaymentDate, plan.Months, first.Year, first.Month);
                     if (index == null) continue;
 
-                    var amount = InstallmentSchedule.PaymentAmount(plan.TotalAmount, plan.Months, index.Value);
+                    var amount = InstallmentSchedule.PaymentAmount(plan.TotalAmount, plan.Months, index.Value, plan.MonthlyPayment);
                     summary.InstallmentsTotal += amount;
 
                     if (!byCard.TryGetValue(plan.CardId, out var cardRow))

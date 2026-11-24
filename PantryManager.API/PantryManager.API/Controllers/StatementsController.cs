@@ -146,6 +146,8 @@ namespace PantryManager.API.Controllers
                     CardId = request.CardId,
                     TotalAmount = RoundMoney(item.TotalAmount),
                     Months = item.Months,
+                    MonthlyPayment = RoundMoneyOrNull(item.MonthlyPayment),
+                    InterestRate = RoundRateOrNull(item.InterestRate),
                     FirstPaymentDate = item.FirstPaymentDate,
                     CategoryId = item.CategoryId,
                     Note = TrimNote(item.Note),
@@ -253,6 +255,12 @@ namespace PantryManager.API.Controllers
 
             if (item.Months < 2 || item.Months > 60) return "Los meses deben estar entre 2 y 60";
             if (item.FirstPaymentDate == default) return "Indica la fecha del primer pago";
+
+            if (item.MonthlyPayment.HasValue
+                && (item.MonthlyPayment.Value <= 0 || item.MonthlyPayment.Value > MaxAmount))
+                return "La mensualidad debe ser mayor a 0 y menor a 99999999";
+            if (item.InterestRate.HasValue && (item.InterestRate.Value < 0 || item.InterestRate.Value > 500))
+                return "La tasa de interés debe estar entre 0 y 500";
 
             if (TrimNote(item.Note)?.Length > 300) return "La nota es demasiado larga (máximo 300 caracteres)";
 

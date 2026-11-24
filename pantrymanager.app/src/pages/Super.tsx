@@ -275,6 +275,13 @@ const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm, o
                   sx={{ height: 44 }}
                 />
               ))}
+              {(() => {
+                // Una subcategoría elegida (por ejemplo, recién creada) se muestra como chip propio.
+                const sub = categories.find((c) => c.id === categoryId && c.parentId !== null);
+                if (!sub) return null;
+                const parent = categories.find((c) => c.id === sub.parentId);
+                return <Chip label={parent ? `${parent.name} · ${sub.name}` : sub.name} color="primary" sx={{ height: 44 }} />;
+              })()}
               <Chip label="+ Nueva" clickable variant="outlined" onClick={() => setNewOpen(true)} sx={{ height: 44 }} />
             </Box>
           </Box>

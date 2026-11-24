@@ -383,6 +383,8 @@ describe("salud financiera", () => {
       remainingAmount: 1000,
       lastPaymentDate: "2027-03-15",
       isFinished: false,
+      monthlyPayment: null,
+      interestRate: null,
       ...over,
     });
     const releases = installmentReleases(
@@ -396,6 +398,31 @@ describe("salud financiera", () => {
     expect(releases).toEqual([
       { name: "Sofá", cardId: 2, lastPaymentDate: "2027-02-28", monthly: 250, remainingPayments: 4 },
       { name: "Celular", cardId: 1, lastPaymentDate: "2027-03-15", monthly: 200, remainingPayments: 4 },
+    ]);
+  });
+
+  test("un plan con mensualidad fija sale con esa mensualidad, no con total / meses", () => {
+    const loan: InstallmentPlan = {
+      id: 4,
+      name: "Préstamo",
+      cardId: 1,
+      cardName: "Azul",
+      cardColor: "#2F6E94",
+      totalAmount: 5000,
+      months: 12,
+      monthlyAmount: 400,
+      firstPaymentDate: "2026-11-18",
+      categoryId: null,
+      note: null,
+      paidCount: 0,
+      remainingAmount: 5000,
+      lastPaymentDate: "2027-10-18",
+      isFinished: false,
+      monthlyPayment: 400,
+      interestRate: 45,
+    };
+    expect(installmentReleases([loan], TODAY)).toEqual([
+      { name: "Préstamo", cardId: 1, lastPaymentDate: "2027-10-18", monthly: 400, remainingPayments: 11 },
     ]);
   });
 

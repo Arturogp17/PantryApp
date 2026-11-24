@@ -1,4 +1,5 @@
-import type { CommitmentMonth, ExpenseCategory, MonthSpend } from "../types";
+import type { CommitmentMonth, ExpenseCategory, InstallmentPlan, MonthSpend } from "../types";
+import { roundMoney } from "./money";
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 
@@ -190,4 +191,15 @@ export function lastForMerchant<T extends { merchant: string }>(recent: T[], mer
   return recent.find((e) => e.merchant.trim().toLowerCase() === needle);
 }
 
-export const CARD_COLORS = ["#2F6E94", "#B5483A", "#3B4517", "#8E6AA8", "#D9822B", "#2C7A5B", "#5E4B8B", "#C25B7E"];
+// Monto de la mensualidad n (0 es la primera) de un plan. Con monthlyPayment cada mensualidad es esa cantidad
+// (intereses incluidos); sin él, es total / meses. Fuera de 0..months-1 no hay mensualidad y devuelve 0.
+export function installmentAmount(
+  plan: Pick<InstallmentPlan, "totalAmount" | "months" | "monthlyPayment">,
+  index: number
+): number {
+  if (index < 0 || index >= plan.months) return 0;
+  if (plan.monthlyPayment != null) return roundMoney(plan.monthlyPayment);
+  return roundMoney(plan.totalAmount / plan.months);
+}
+
+export const CARD_COLORS =["#2F6E94", "#B5483A", "#3B4517", "#8E6AA8", "#D9822B", "#2C7A5B", "#5E4B8B", "#C25B7E"];

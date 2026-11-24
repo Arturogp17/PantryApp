@@ -3,7 +3,7 @@ import { Box, Button, ButtonBase, Typography } from "@mui/material";
 import api from "../../api/client";
 import { CommitmentsResponse, InstallmentPlan } from "../../types";
 import { errorMessage } from "../../lib/errors";
-import { buildCommitmentChart, monthKey, monthLong } from "../../lib/expenses";
+import { buildCommitmentChart, installmentAmount, monthKey, monthLong } from "../../lib/expenses";
 import { formatMoney, roundMoney } from "../../lib/money";
 import { useAppTheme } from "../../theme/ThemeContext";
 import { Dot, StackedBars } from "./charts";
@@ -50,9 +50,14 @@ const PlanTile = ({ plan, track, onClick }: { plan: InstallmentPlan; track: stri
             <Dot color={plan.cardColor} size={10} />
             <Typography sx={{ fontSize: 13, fontWeight: 700, color: "text.secondary" }}>{plan.cardName}</Typography>
           </Box>
+          {plan.interestRate != null && (
+            <Typography sx={{ mt: 0.25, fontSize: 12, fontWeight: 800, color: "warning.dark" }}>
+              {`Con intereses · ${plan.interestRate} %`}
+            </Typography>
+          )}
         </Box>
         <Box sx={{ flex: "0 0 auto", textAlign: "right" }}>
-          <Typography sx={{ fontWeight: 800 }}>{formatMoney(plan.monthlyAmount)}</Typography>
+          <Typography sx={{ fontWeight: 800 }}>{formatMoney(installmentAmount(plan, 0))}</Typography>
           <Typography sx={{ fontSize: 12, color: "text.secondary" }}>al mes</Typography>
         </Box>
       </Box>

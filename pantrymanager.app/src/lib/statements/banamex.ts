@@ -42,7 +42,8 @@ export function annualRateAfterLabel(lines: string[]): number | null {
   const label = /TASA DE INTER[ÉE]S ANUAL/i;
   for (let i = 0; i < lines.length; i++) {
     if (!label.test(lines[i])) continue;
-    for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+    // En el navegador (pdf.js) pueden quedar varias líneas de otras columnas entre la etiqueta y el valor.
+    for (let j = i + 1; j < Math.min(lines.length, i + 9); j++) {
       if (!/sin iva/i.test(lines[j])) continue;
       const pct = [...lines[j].matchAll(/(\d+(?:\.\d+)?)\s*%/g)];
       if (pct.length > 0) return Number(pct[pct.length - 1][1]);
