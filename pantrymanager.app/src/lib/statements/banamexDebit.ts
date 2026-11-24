@@ -26,7 +26,7 @@ const BENEFICIARY = /AL BENEF\.?\s+(.+?)(?=\s*\(DATO|\s+SU REF|\s+CTA\b|\s+CLAVE
 
 const money = (text: string): number => Number(text.replace(/,/g, ""));
 const round2 = (n: number): number => Math.round(n * 100) / 100;
-const normalizeLine = (line: string): string => line.replace(/\s+/g, " ").trim();
+const normalizeLine = (line: string): string => line.normalize("NFC").replace(/\s+/g, " ").trim();
 const pad = (n: number): string => String(n).padStart(2, "0");
 const isoDate = (year: number, month: number, day: number): string => `${year}-${pad(month)}-${pad(day)}`;
 

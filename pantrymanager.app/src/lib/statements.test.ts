@@ -238,6 +238,32 @@ describe("líneas de un PDF", () => {
     ]);
     expect(lines).toEqual(["Título", "Periodo: 17-oct-2026"]);
   });
+
+  test("une un trozo partido dentro de una palabra si el hueco es cero", () => {
+    const lines = piecesToLines([
+      { str: "Nú", x: 100, y: 500, width: 14 },
+      { str: "mero de tarjeta:", x: 114, y: 500, width: 80 },
+      { str: "4000111122223333", x: 200, y: 500, width: 110 },
+    ]);
+    expect(lines).toEqual(["Número de tarjeta: 4000111122223333"]);
+  });
+
+  test("pega un acento combinante descompuesto y deja la forma NFC", () => {
+    const lines = piecesToLines([
+      { str: "Nu", x: 100, y: 500, width: 12 },
+      { str: "́mero", x: 115, y: 500, width: 30 },
+    ]);
+    expect(lines).toEqual(["Número"]);
+    expect(lines[0].length).toBe(6);
+  });
+
+  test("sin ancho conocido, separa con espacio como antes", () => {
+    const lines = piecesToLines([
+      { str: "Nú", x: 100, y: 500 },
+      { str: "mero", x: 114, y: 500 },
+    ]);
+    expect(lines).toEqual(["Nú mero"]);
+  });
 });
 
 // Estado de ejemplo con datos inventados, con la estructura de uno de BBVA.
@@ -309,6 +335,24 @@ describe("estado de BBVA", () => {
     ]);
     expect(withRate.annualRate).toBe(50.82);
     expect(s.annualRate).toBeNull();
+  });
+});
+
+describe("estado de BBVA sin la línea 'Número de tarjeta'", () => {
+  // Cambia la línea del número completo y las marcas de la sección de movimientos por otra etiqueta.
+  const conEtiqueta = (linea: string) =>
+    BBVA_SAMPLE.map((l) => l.replace("Número de tarjeta: 4000111122223333", linea).replace("Tarjeta titular: XXXXXXXXXXXX3333", linea));
+
+  test("toma los últimos 4 dígitos de 'Tarjeta titular'", () => {
+    expect(parseBbvaStatement(conEtiqueta("Tarjeta titular: XXXXXXXXXXXX5947")).last4).toBe("5947");
+  });
+
+  test("toma los últimos 4 dígitos de 'Número de cuenta'", () => {
+    expect(parseBbvaStatement(conEtiqueta("Número de cuenta: XXXXXX5947")).last4).toBe("5947");
+  });
+
+  test("si no hay ninguna etiqueta, sigue dando el error", () => {
+    expect(() => parseBbvaStatement(conEtiqueta(""))).toThrow(StatementParseError);
   });
 });
 

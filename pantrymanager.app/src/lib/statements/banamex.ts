@@ -34,7 +34,29 @@ export function cleanMerchant(raw: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-const normalizeLine = (line: string): string => line.replace(/\s+/g, " ").trim();
+// Quita acentos y mayúsculas para comparar etiquetas: "Número" y "NUMERO" dan lo mismo.
+export const fold = (text: string): string => text.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase();
+
+const normalizeLine = (line: string): string => line.normalize("NFC").replace(/\s+/g, " ").trim();
+
+// Últimos 4 dígitos del número de tarjeta. Primero "Número de tarjeta" con los dígitos completos;
+// si no aparece, prueba las etiquetas de respaldo (con la tarjeta enmascarada, por ejemplo "XXXXXXXXXXXX5947").
+export function findCardLast4(lines: string[], fallbacks: RegExp[] = []): string | null {
+  for (const line of lines) {
+    const m = /NUMERO DE TARJETA:?\s+(\d[\d ]{14,22}\d)/.exec(fold(line));
+    if (m) return m[1].replace(/\D/g, "").slice(-4);
+  }
+  for (const re of fallbacks) {
+    for (const line of lines) {
+      const m = re.exec(fold(line));
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
+// "Tarjeta titular: XXXXXXXXXXXX5947": solo los últimos 4 dígitos tras las X.
+export const MASKED_TITULAR = /TARJETA TITULAR:?\s*[X*\s]*(\d{4})\b/;
 
 // Tasa anual del estado: la etiqueta "TASA DE INTERES ANUAL" va en una línea y el valor en las siguientes,
 // en una línea con "Sin IVA" que termina con la tasa (por ejemplo "71.5% Sin IVA 55.52%"). Se toma el último porcentaje.
@@ -76,8 +98,7 @@ export function parseBanamexStatement(rawLines: string[]): ParsedStatement {
   };
 
   // Solo se guardan los últimos 4 dígitos del número de tarjeta.
-  const cardNumber = first(/N[úu]mero de tarjeta\s+((?:\d[\d ]{14,22}\d))/i);
-  const last4 = cardNumber ? cardNumber.replace(/\D/g, "").slice(-4) : null;
+  const last4 = findCardLast4(lines, [MASKED_TITULAR]);
   if (!last4) throw new StatementParseError("No encontré el número de tarjeta en el estado.");
 
   const period = /Periodo:\s*(\d{1,2}-[a-zA-Z]{3}-\d{4})\s+al\s+(\d{1,2}-[a-zA-Z]{3}-\d{4})/i.exec(text);

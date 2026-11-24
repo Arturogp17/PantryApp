@@ -1,4 +1,4 @@
-import { annualRateAfterLabel, cleanMerchant, parseSpanishDate } from "./banamex";
+import { MASKED_TITULAR, annualRateAfterLabel, cleanMerchant, findCardLast4, parseSpanishDate } from "./banamex";
 import type { ParsedStatement, StatementInstallment, StatementLine } from "./types";
 import { StatementParseError } from "./types";
 
@@ -6,7 +6,7 @@ const DATE = "(\\d{1,2}-[a-zA-Z]{3}-\\d{4})";
 const MONEY = "\\$\\s*([\\d,]+\\.\\d{2})";
 
 const money = (text: string): number => Number(text.replace(/,/g, ""));
-const normalizeLine = (line: string): string => line.replace(/\s+/g, " ").trim();
+const normalizeLine = (line: string): string => line.normalize("NFC").replace(/\s+/g, " ").trim();
 
 type Section = "none" | "installments" | "regular";
 
@@ -49,9 +49,8 @@ export function parseBbvaStatement(rawLines: string[]): ParsedStatement {
     return null;
   };
 
-  // Solo se guardan los últimos 4 dígitos del número de tarjeta.
-  const cardNumber = first(/N[úu]mero de tarjeta:?\s+(\d[\d ]{14,22}\d)/i);
-  const last4 = cardNumber ? cardNumber.replace(/\D/g, "").slice(-4) : null;
+  // Solo se guardan los últimos 4 dígitos del número de tarjeta. Si no aparece, se usa la tarjeta o cuenta enmascarada.
+  const last4 = findCardLast4(lines, [MASKED_TITULAR, /NUMERO DE CUENTA:?\s*[X*\s]*(\d{4})\b/]);
   if (!last4) throw new StatementParseError("No encontré el número de tarjeta en el estado.");
 
   const period = /Periodo:\s*(\d{1,2}-[a-zA-Z]{3}-\d{4})\s+al\s+(\d{1,2}-[a-zA-Z]{3}-\d{4})/i.exec(text);

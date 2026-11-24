@@ -4,6 +4,29 @@ export interface TextPiece {
   str: string;
   x: number;
   y: number;
+  // Ancho del trozo en el PDF, si pdf.js lo entrega.
+  width?: number;
+}
+
+// Un trozo que empieza con puntuación o con un acento combinante va pegado al anterior.
+const ATTACHES_LEFT = /^[\p{P}\p{M}]/u;
+
+// Une los trozos de una línea ya ordenados por x. Si se conoce el ancho del anterior y el hueco entre ellos
+// es casi cero, van pegados (pdf.js a veces parte una palabra en dos trozos). Si no, van con un espacio.
+function joinRow(items: TextPiece[]): string {
+  let text = "";
+  items.forEach((item, i) => {
+    if (i === 0) {
+      text = item.str;
+      return;
+    }
+    const prev = items[i - 1];
+    const known = prev.width !== undefined;
+    const gap = known ? item.x - (prev.x + (prev.width as number)) : Infinity;
+    const glue = known && (gap < 1 || ATTACHES_LEFT.test(item.str));
+    text += (glue ? "" : " ") + item.str;
+  });
+  return text.normalize("NFC").replace(/\s+/g, " ").trim();
 }
 
 // Junta trozos de texto en líneas: los que tienen casi la misma altura van en la misma línea, de izquierda a derecha.
@@ -20,17 +43,14 @@ export function piecesToLines(pieces: TextPiece[], tolerance = 3): string[] {
 
   return rows
     .sort((a, b) => b.y - a.y)
-    .map((r) =>
-      r.items
-        .sort((a, b) => a.x - b.x)
-        .map((i) => i.str.trim())
-        .join(" ")
-    );
+    .map((r) => joinRow(r.items.sort((a, b) => a.x - b.x)))
+    .filter((line) => line.length > 0);
 }
 
 interface PdfTextItem {
   str?: string;
   transform?: number[];
+  width?: number;
 }
 
 export async function extractPdfLines(file: File): Promise<string[]> {
@@ -49,7 +69,7 @@ export async function extractPdfLines(file: File): Promise<string[]> {
     const pieces: TextPiece[] = [];
     for (const item of content.items as PdfTextItem[]) {
       if (typeof item.str === "string" && item.transform) {
-        pieces.push({ str: item.str, x: item.transform[4], y: item.transform[5] });
+        pieces.push({ str: item.str, x: item.transform[4], y: item.transform[5], width: item.width });
       }
     }
     lines.push(...piecesToLines(pieces));
