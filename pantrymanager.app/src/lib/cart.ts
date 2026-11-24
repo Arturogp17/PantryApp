@@ -33,8 +33,10 @@ export const lineTotal = (line: Pick<CartLine, "quantity" | "unitPrice" | "promo
 
 // Suma de los renglones ya redondeados, igual que el servidor, para que el total
 // coincida con lo que se ve renglón por renglón.
-export const cartTotal = (lines: CartLine[]): number =>
+export const itemsTotal = (lines: Pick<CartLine, "quantity" | "unitPrice" | "promo">[]): number =>
   roundMoney(lines.reduce((acc, l) => acc + lineTotal(l), 0));
+
+export const cartTotal = (lines: CartLine[]): number => itemsTotal(lines);
 
 // Lo que se ahorra en el renglón por la promoción.
 export const lineSavings = (line: Pick<CartLine, "quantity" | "unitPrice" | "promo">): number =>

@@ -1,21 +1,27 @@
-import { ReactNode, useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   ButtonBase,
+  Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
+  FormControlLabel,
   IconButton,
   Snackbar,
+  Switch,
+  TextField,
   Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import api from "../api/client";
 import BarcodeScanner from "../components/BarcodeScanner";
 import ItemDialog, { ItemDraft } from "../components/ItemDialog";
@@ -23,16 +29,43 @@ import { useAppTheme } from "../theme/ThemeContext";
 import { rowStyle } from "../theme/rowStyle";
 import { useCatalog } from "../hooks/useCatalog";
 import { useShoppingList } from "../hooks/useShoppingList";
-import { BarcodeLookup, ShoppingListItem } from "../types";
+import { PaymentSplit, SplitRow, addSplitRow, endSplit, rowsToParts, startSplit } from "../components/gastos/PaymentSplit";
+import { resolveSplit } from "../lib/split";
+import { BarcodeLookup, Card, ExpenseCategory, ShoppingListItem } from "../types";
 import { CartLine, addLine, cartTotal, lineSavings, lineTotal, removeLine, toPurchaseItems, updateLine } from "../lib/cart";
 import { errorMessage } from "../lib/errors";
 import { promoLabel } from "../lib/promo";
 import { formatMoney, formatQuantity, roundMoney } from "../lib/money";
-import { FlushResult, enqueuePurchase, flushPending, loadPending } from "../lib/offlineQueue";
+import { FlushResult, PurchasePayment, enqueuePurchase, flushPending, loadPending, purchaseBody } from "../lib/offlineQueue";
 import { readJson, writeJson } from "../lib/storage";
 import { unitLabel } from "../lib/units";
 
 const CART_KEY = "pantry.cart";
+const LAST_PAYMENT_KEY = "pantry.lastPurchasePayment";
+const PAYMENT_OPTIONS_KEY = "pantry.paymentOptions";
+
+// Tarjetas y categorías de gasto. Se guardan la última vez que cargaron bien, para usarlas sin señal.
+interface PaymentOptions {
+  cards: Card[];
+  categories: ExpenseCategory[];
+}
+
+interface LastPayment {
+  cardId: number | null;
+  categoryId: number | null;
+}
+
+// Quita acentos y mayúsculas para comparar nombres: "Súper" y "super" son lo mismo.
+const plain = (text: string): string =>
+  text.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+
+const defaultMerchantFor = (category: ExpenseCategory | undefined): string =>
+  category && plain(category.name) === "costco" ? "Costco" : "Súper";
+
+const cardLabel = (c: Card): string => {
+  const base = c.last4 ? `${c.name} ·${c.last4}` : c.name;
+  return c.kind === "voucher" && !plain(c.name).includes("vale") ? `${base} · Vales` : base;
+};
 
 interface DialogState {
   mode: "cart" | "list";
@@ -114,12 +147,177 @@ const SectionTitle = ({ children, action }: { children: string; action?: ReactNo
   </Box>
 );
 
+interface CheckoutDialogProps {
+  open: boolean;
+  total: number;
+  lineCount: number;
+  options: PaymentOptions | null;
+  onClose: () => void;
+  onConfirm: (payment: PurchasePayment) => void;
+}
+
+// Pregunta con qué se pagó y si se registra como gasto. Recuerda la última elección.
+const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm }: CheckoutDialogProps) => {
+  const cards = useMemo(() => (options?.cards ?? []).filter((c) => c.isActive), [options]);
+  const categories = useMemo(() => options?.categories ?? [], [options]);
+  const topLevel = useMemo(() => categories.filter((c) => c.parentId === null), [categories]);
+  const expenseAvailable = categories.length > 0;
+
+  // Una fila por método. Sin dividir hay una sola fila, y su monto es el total de la compra.
+  const [rows, setRows] = useState<SplitRow[]>([{ cardId: null, amount: "" }]);
+  const [split, setSplit] = useState(false);
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [merchant, setMerchant] = useState("Súper");
+  const [merchantTouched, setMerchantTouched] = useState(false);
+  const [createExpense, setCreateExpense] = useState(true);
+
+  // Solo al abrir: si las opciones se actualizan mientras se elige, no se borra lo que ya eligió la persona.
+  useEffect(() => {
+    if (!open) return;
+
+    const last = readJson<LastPayment | null>(LAST_PAYMENT_KEY, null);
+    const category =
+      topLevel.find((c) => c.id === last?.categoryId) ??
+      topLevel.find((c) => plain(c.name) === "super") ??
+      topLevel[0];
+
+    setRows([{ cardId: cards.find((c) => c.id === last?.cardId)?.id ?? null, amount: "" }]);
+    setSplit(false);
+    setCategoryId(category?.id ?? null);
+    setMerchant(defaultMerchantFor(category));
+    setMerchantTouched(false);
+    setCreateExpense(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const selected = categories.find((c) => c.id === categoryId);
+
+  const pickCategory = (id: number) => {
+    setCategoryId(id);
+    if (!merchantTouched) setMerchant(defaultMerchantFor(categories.find((c) => c.id === id)));
+  };
+
+  // Sin dividir, la única parte es el total. Dividido, la última fila recibe lo que falte.
+  const resolved = resolveSplit(total, rowsToParts(rows));
+  const error = split ? resolved.error : null;
+  const freeAmount = resolved.parts[resolved.parts.length - 1].amount;
+
+  const toggleSplit = () => {
+    setRows(split ? endSplit(rows) : startSplit(rows, cards));
+    setSplit(!split);
+  };
+
+  const changeCard = (index: number, cardId: number | null) =>
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, cardId } : row)));
+
+  const changeAmount = (index: number, amount: string) =>
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, amount } : row)));
+
+  const confirm = () => {
+    if (error) return;
+    const payment: PurchasePayment = {
+      createExpense: createExpense && expenseAvailable && categoryId !== null,
+      categoryId,
+      merchant: merchant.trim() || defaultMerchantFor(selected),
+      parts: resolved.parts,
+    };
+    if (categoryId !== null) {
+      // Se recuerda el método de la primera parte.
+      const last: LastPayment = { cardId: resolved.parts[0].cardId, categoryId };
+      writeJson(LAST_PAYMENT_KEY, last);
+    }
+    onConfirm(payment);
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+      <DialogTitle>¿Cómo pagaste?</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 2 }}>
+          Compra de {formatMoney(total)} con {lineCount} {lineCount === 1 ? "producto" : "productos"}. Las
+          existencias suben y el precio de cada producto queda como el de hoy.
+        </DialogContentText>
+
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <PaymentSplit
+            split={split}
+            allowSplit
+            title="Método de pago"
+            rows={rows}
+            methods={cards}
+            labelOf={cardLabel}
+            total={total}
+            freeAmount={freeAmount}
+            error={error}
+            onToggle={toggleSplit}
+            onAdd={() => setRows(addSplitRow(rows, cards))}
+            onCardChange={changeCard}
+            onAmountChange={changeAmount}
+          />
+
+          <Box>
+            <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1 }}>Categoría</Typography>
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+              {topLevel.map((c) => (
+                <Chip
+                  key={c.id}
+                  label={c.name}
+                  clickable
+                  color={categoryId === c.id ? "primary" : "default"}
+                  variant={categoryId === c.id ? "filled" : "outlined"}
+                  onClick={() => pickCategory(c.id)}
+                  sx={{ height: 44 }}
+                />
+              ))}
+            </Box>
+          </Box>
+
+          <TextField
+            label="Tienda (opcional)"
+            value={merchant}
+            onChange={(e) => {
+              setMerchantTouched(true);
+              setMerchant(e.target.value);
+            }}
+            slotProps={{ htmlInput: { maxLength: 120 } }}
+          />
+
+          <Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={createExpense && expenseAvailable}
+                  disabled={!expenseAvailable}
+                  onChange={(e) => setCreateExpense(e.target.checked)}
+                />
+              }
+              label="Registrar como gasto"
+            />
+            {!expenseAvailable && (
+              <Typography variant="caption" sx={{ display: "block", color: "text.secondary" }}>
+                Sin conexión: la compra se guarda sin registrar el gasto
+              </Typography>
+            )}
+          </Box>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Todavía no</Button>
+        <Button variant="contained" onClick={confirm} disabled={error !== null}>
+          Terminar compra
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 const Super = () => {
   const { tokens } = useAppTheme();
   const {
     items,
     suggestions,
     offline: listOffline,
+    refreshing,
     refresh: refreshList,
     add: addToList,
     remove: removeFromList,
@@ -131,7 +329,10 @@ const Super = () => {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentOptions, setPaymentOptions] = useState<PaymentOptions | null>(() =>
+    readJson<PaymentOptions | null>(PAYMENT_OPTIONS_KEY, null)
+  );
   const [lookingUp, setLookingUp] = useState(false);
   const [snack, setSnack] = useState<SnackState | null>(null);
 
@@ -155,10 +356,7 @@ const Super = () => {
   const sync = useCallback(async (): Promise<FlushResult> => {
     const result = await flushPending(
       async (purchase) => {
-        await api.post("/purchases", {
-          clientRequestId: purchase.clientRequestId,
-          items: purchase.items,
-        });
+        await api.post("/purchases", purchaseBody(purchase));
       },
       (error) => errorMessage(error, "Rechazada por el servidor")
     );
@@ -182,6 +380,30 @@ const Super = () => {
     if (online) void sync();
   }, [online, sync]);
 
+  // Tarjetas y categorías para el diálogo de pago. Si no hay señal, queda la última copia guardada.
+  const loadPaymentOptions = useCallback(async () => {
+    try {
+      const [cards, categories] = await Promise.all([
+        api.get<Card[]>("/cards"),
+        api.get<ExpenseCategory[]>("/expense-categories"),
+      ]);
+      const fresh: PaymentOptions = { cards: cards.data, categories: categories.data };
+      writeJson(PAYMENT_OPTIONS_KEY, fresh);
+      setPaymentOptions(fresh);
+    } catch {
+      // Sin conexión: el diálogo usa la copia que ya tiene.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPaymentOptions();
+  }, [loadPaymentOptions]);
+
+  // Botón de actualizar: trae la lista (y lo que agregó la otra persona) y el catálogo.
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refreshList(), refreshCatalog()]);
+  }, [refreshList, refreshCatalog]);
+
   const total = cartTotal(cart);
   const savings = roundMoney(cart.reduce((acc, line) => acc + lineSavings(line), 0));
   const toFind = items.filter((item) => !cart.some((line) => line.productId === item.productId));
@@ -203,14 +425,15 @@ const Super = () => {
       mode: "cart",
       title: "Poner en el carrito",
       draft: {
-        productId: item.productId,
+        // Un renglón agregado sin conexión puede no tener producto todavía (id 0): se crea al comprar.
+        productId: item.productId > 0 ? item.productId : null,
         barcode: item.barcode,
         name: item.name,
         stockType: item.stockType,
         quantity: item.quantity,
         unitPrice: item.lastPrice > 0 ? item.lastPrice : null,
         imageUrl: item.imageUrl,
-        lockProduct: true,
+        lockProduct: item.productId > 0,
       },
     });
 
@@ -344,11 +567,11 @@ const Super = () => {
 
   // La compra se guarda primero en el teléfono y después se envía: si falla la señal
   // o se cierra la app, no se pierde.
-  const finishPurchase = async () => {
-    setConfirmOpen(false);
+  const finishPurchase = async (payment: PurchasePayment) => {
+    setPaymentOpen(false);
     if (cart.length === 0) return;
 
-    enqueuePurchase(toPurchaseItems(cart));
+    enqueuePurchase(toPurchaseItems(cart), payment);
     setCart([]);
     setPendingCount(loadPending().length);
 
@@ -367,12 +590,19 @@ const Super = () => {
 
   return (
     <Box sx={{ position: "relative", zIndex: 1, maxWidth: 520, mx: "auto", px: 2, pt: 2, pb: "150px" }}>
-      <Typography component="h1" variant="h4" sx={{ lineHeight: 1.1 }}>
-        Súper
-      </Typography>
-      <Typography variant="body2" sx={{ color: "text.secondary" }}>
-        Lista compartida
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+        <Box>
+          <Typography component="h1" variant="h4" sx={{ lineHeight: 1.1 }}>
+            Súper
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Lista compartida
+          </Typography>
+        </Box>
+        <IconButton aria-label="Actualizar la lista" onClick={() => void refreshAll()} disabled={refreshing}>
+          {refreshing ? <CircularProgress size={22} color="inherit" /> : <RefreshIcon />}
+        </IconButton>
+      </Box>
 
       {(!online || listOffline) && (
         <Alert severity="warning" sx={{ mt: 2 }}>
@@ -460,7 +690,10 @@ const Super = () => {
             fullWidth
             variant="contained"
             size="large"
-            onClick={() => setConfirmOpen(true)}
+            onClick={() => {
+              setPaymentOpen(true);
+              void loadPaymentOptions();
+            }}
             sx={{ mt: 2, minHeight: 52 }}
           >
             Finalizar compra · {formatMoney(total)}
@@ -589,22 +822,14 @@ const Super = () => {
         onDetected={(code) => void handleCode(code)}
       />
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>Finalizar compra</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Se registra una compra de {formatMoney(total)} con {cart.length}{" "}
-            {cart.length === 1 ? "producto" : "productos"}. Las existencias suben y el precio de cada producto
-            queda como el de hoy.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>Todavía no</Button>
-          <Button variant="contained" onClick={() => void finishPurchase()}>
-            Registrar
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <CheckoutDialog
+        open={paymentOpen}
+        total={total}
+        lineCount={cart.length}
+        options={paymentOptions}
+        onClose={() => setPaymentOpen(false)}
+        onConfirm={(payment) => void finishPurchase(payment)}
+      />
 
       <Snackbar
         open={lookingUp}

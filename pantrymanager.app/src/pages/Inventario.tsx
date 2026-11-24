@@ -17,8 +17,26 @@ import { Product } from "../types";
 import { useAppTheme } from "../theme/ThemeContext";
 import { rowStyle } from "../theme/rowStyle";
 import { errorMessage } from "../lib/errors";
+import { newId } from "../lib/id";
+import { enqueueAction, isOfflineError, loadOutbox, removeWhere } from "../lib/outbox";
 import { formatQuantity, roundQuantity } from "../lib/money";
 import { unitLabel, unitStep } from "../lib/units";
+
+const OFFLINE_SAVED = "Guardado sin conexión. Se subirá solo.";
+
+// Último ajuste de stock pendiente de cada producto según la cola.
+const queuedStock = (): Map<number, number> => {
+  const pending = new Map<number, number>();
+  for (const entry of loadOutbox()) {
+    if (entry.action.kind === "stock") pending.set(entry.action.productId, entry.action.quantity);
+  }
+  return pending;
+};
+
+// El stock es un valor absoluto: un ajuste nuevo reemplaza al que siguiera en la cola.
+const forgetQueuedStock = (productId: number) => {
+  removeWhere((entry) => entry.action.kind === "stock" && entry.action.productId === productId);
+};
 
 // Inventario manual: se ajusta a mano, por ejemplo el día antes de ir al súper.
 const Inventario = () => {
@@ -33,7 +51,11 @@ const Inventario = () => {
   const load = useCallback(async () => {
     try {
       const response = await api.get<Product[]>("/products");
-      setProducts(response.data);
+      // Los ajustes hechos sin conexión se siguen mostrando hasta que se suban.
+      const pending = queuedStock();
+      setProducts(
+        response.data.map((p) => (pending.has(p.id) ? { ...p, quantity: pending.get(p.id) ?? p.quantity } : p))
+      );
     } catch (error) {
       setMessage(errorMessage(error, "No se pudo cargar el inventario"));
     } finally {
@@ -45,6 +67,14 @@ const Inventario = () => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const onSynced = () => {
+      void load();
+    };
+    window.addEventListener("outbox-synced", onSynced);
+    return () => window.removeEventListener("outbox-synced", onSynced);
+  }, [load]);
+
   const visible = useMemo(() => {
     const term = filter.trim().toLowerCase();
     return products
@@ -53,19 +83,32 @@ const Inventario = () => {
       .sort((a, b) => a.name.localeCompare(b.name, "es"));
   }, [products, filter, onlyLow]);
 
-  const setStock = async (product: Product, quantity: number) => {
+  // "queued" si quedó en la cola sin conexión. Otros errores revierten el cambio y avisan.
+  const setStock = async (product: Product, quantity: number): Promise<"saved" | "queued" | "failed"> => {
     const value = Math.max(0, roundQuantity(quantity));
     const previous = product.quantity;
 
-    // Se actualiza en pantalla de inmediato y se revierte si el servidor falla.
+    // Se actualiza en pantalla de inmediato. Solo se revierte si el servidor responde con un error.
     setProducts((list) => list.map((p) => (p.id === product.id ? { ...p, quantity: value } : p)));
 
     try {
       await api.patch(`/products/${product.id}/stock`, { quantity: value });
+      forgetQueuedStock(product.id);
+      return "saved";
     } catch (error) {
+      if (isOfflineError(error)) {
+        forgetQueuedStock(product.id);
+        enqueueAction({ kind: "stock", productId: product.id, quantity: value });
+        return "queued";
+      }
       setProducts((list) => list.map((p) => (p.id === product.id ? { ...p, quantity: previous } : p)));
       setMessage(errorMessage(error, "No se pudo guardar el cambio"));
+      return "failed";
     }
+  };
+
+  const applyStock = async (product: Product, quantity: number) => {
+    if ((await setStock(product, quantity)) === "queued") setMessage(OFFLINE_SAVED);
   };
 
   const finishEdit = (product: Product) => {
@@ -75,16 +118,38 @@ const Inventario = () => {
     setEditing(null);
 
     if (editing.text.trim() !== "" && Number.isFinite(parsed) && parsed !== product.quantity) {
-      setStock(product, parsed);
+      void applyStock(product, parsed);
+    }
+  };
+
+  // Agrega el producto a la lista. Devuelve true si quedó en la cola sin conexión.
+  const sendToList = async (product: Product): Promise<boolean> => {
+    const clientRequestId = newId();
+    const body = {
+      productId: product.id,
+      barcode: product.barcode ?? null,
+      stockType: product.stockType,
+      quantity: 1,
+    };
+
+    try {
+      await api.post("/shoppinglist", { ...body, clientRequestId });
+      return false;
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      enqueueAction({ kind: "list-add", clientRequestId, body });
+      return true;
     }
   };
 
   const markEmpty = async (product: Product) => {
-    await setStock(product, 0);
+    const stock = await setStock(product, 0);
 
     try {
-      await api.post("/shoppinglist", { productId: product.id, quantity: 1, stockType: product.stockType });
-      setMessage(`${product.name} se acabó y quedó en la lista`);
+      const listQueued = await sendToList(product);
+      setMessage(
+        stock === "queued" || listQueued ? OFFLINE_SAVED : `${product.name} se acabó y quedó en la lista`
+      );
     } catch (error) {
       setMessage(errorMessage(error, "Quedó en 0, pero no se pudo agregar a la lista"));
     }
@@ -92,8 +157,8 @@ const Inventario = () => {
 
   const addToList = async (product: Product) => {
     try {
-      await api.post("/shoppinglist", { productId: product.id, quantity: 1, stockType: product.stockType });
-      setMessage(`${product.name} agregado a la lista`);
+      const queued = await sendToList(product);
+      setMessage(queued ? OFFLINE_SAVED : `${product.name} agregado a la lista`);
     } catch (error) {
       setMessage(errorMessage(error, "No se pudo agregar a la lista"));
     }
@@ -171,7 +236,7 @@ const Inventario = () => {
 
               <IconButton
                 aria-label={`Quitar de ${product.name}`}
-                onClick={() => setStock(product, product.quantity - step)}
+                onClick={() => void applyStock(product, product.quantity - step)}
                 disabled={empty}
                 sx={{ width: 44, height: 44 }}
               >
@@ -202,7 +267,7 @@ const Inventario = () => {
 
               <IconButton
                 aria-label={`Sumar a ${product.name}`}
-                onClick={() => setStock(product, product.quantity + step)}
+                onClick={() => void applyStock(product, product.quantity + step)}
                 sx={{ width: 44, height: 44 }}
               >
                 <AddIcon />

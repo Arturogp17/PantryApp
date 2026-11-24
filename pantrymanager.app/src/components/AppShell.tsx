@@ -2,6 +2,8 @@ import { Box, Tab, Tabs } from "@mui/material";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppTheme } from "../theme/ThemeContext";
+import SyncBanner from "./SyncBanner";
+import { useOutboxSync } from "../hooks/useOutboxSync";
 
 interface NavTab {
   to: string;
@@ -18,12 +20,14 @@ const AppShell = () => {
   const tabs: NavTab[] = [
     { to: "/super", label: "Súper" },
     { to: "/compras", label: "Compras" },
+    { to: "/gastos", label: "Gastos" },
     { to: "/inventario", label: "Inventario" },
     ...(isAdmin ? [{ to: "/admin/products", label: "Productos" }] : []),
     { to: "/ajustes", label: "Ajustes" },
   ];
 
   const current = tabs.find((t) => pathname.startsWith(t.to))?.to ?? false;
+  const outbox = useOutboxSync();
 
   return (
     <Box sx={{ minHeight: "100dvh" }}>
@@ -57,6 +61,7 @@ const AppShell = () => {
           ))}
         </Tabs>
       </Box>
+      <SyncBanner {...outbox} />
       <Outlet />
     </Box>
   );

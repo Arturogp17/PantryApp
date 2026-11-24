@@ -6,7 +6,9 @@ using PantryManager.API.Models;
 using PantryManager.API.Services;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace PantryManager.API.Controllers
@@ -45,6 +47,9 @@ namespace PantryManager.API.Controllers
                 return BadRequest(new { Message = "Hay una promoción que no es válida" });
             }
 
+            var merchant = request.Merchant?.Trim() ?? "";
+            if (merchant.Length > 120) return BadRequest(new { Message = "El comercio es demasiado largo (máximo 120 caracteres)" });
+
             // Reintento de una compra que ya se guardó: se devuelve la existente.
             if (request.ClientRequestId.HasValue)
             {
@@ -53,6 +58,53 @@ namespace PantryManager.API.Controllers
                 {
                     return Ok(ToDto(existing));
                 }
+            }
+
+            // Cada pago del gasto se guarda redondeado a centavos.
+            var payments = new List<(int? CardId, decimal Amount)>();
+            if (request.CreateExpense)
+            {
+                if (!request.ExpenseCategoryId.HasValue) return BadRequest(new { Message = "Indica la categoría del gasto" });
+                if (!await _context.ExpenseCategories.AnyAsync(c => c.Id == request.ExpenseCategoryId.Value))
+                {
+                    return BadRequest(new { Message = "La categoría no existe" });
+                }
+
+                if (request.Payments == null || request.Payments.Count < 1 || request.Payments.Count > 5)
+                {
+                    return BadRequest(new { Message = "Indica de 1 a 5 pagos" });
+                }
+
+                if (request.Payments.Any(p => PromoCalculator.Round(p.Amount) <= 0))
+                {
+                    return BadRequest(new { Message = "Cada pago debe ser mayor a 0" });
+                }
+
+                payments = request.Payments
+                    .Select(p => (p.CardId, PromoCalculator.Round(p.Amount)))
+                    .ToList();
+
+                var cardIds = request.Payments
+                    .Where(p => p.CardId.HasValue)
+                    .Select(p => p.CardId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                if (cardIds.Count > 0)
+                {
+                    var cards = await _context.Cards.Where(c => cardIds.Contains(c.Id)).ToListAsync();
+                    if (cards.Count != cardIds.Count) return BadRequest(new { Message = "La tarjeta no existe" });
+                    if (cards.Any(c => !c.IsActive)) return BadRequest(new { Message = "La tarjeta está desactivada" });
+                }
+            }
+
+            // Fecha real de la captura si cae entre hace 60 días y 10 minutos en el futuro; si no, el momento del envío.
+            var now = DateTime.UtcNow;
+            var purchaseDate = now;
+            if (request.PurchasedAt.HasValue)
+            {
+                var purchasedAt = request.PurchasedAt.Value.ToUniversalTime();
+                if (purchasedAt >= now.AddDays(-60) && purchasedAt <= now.AddMinutes(10)) purchaseDate = purchasedAt;
             }
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -98,11 +150,50 @@ namespace PantryManager.API.Controllers
                     });
                 }
 
+                var purchaseTotal = PromoCalculator.Round(totalAmount);
+
+                // Con CreateExpense, la compra registra un gasto por cada método de pago, en esta misma transacción.
+                var expenses = new List<Expense>();
+                if (request.CreateExpense)
+                {
+                    var paymentsSum = payments.Sum(p => p.Amount);
+                    if (Math.Abs(paymentsSum - purchaseTotal) > 0.01m)
+                    {
+                        await transaction.RollbackAsync();
+                        return BadRequest(new
+                        {
+                            Message = $"Los pagos suman ${paymentsSum.ToString("0.00", CultureInfo.InvariantCulture)} y la compra es de ${purchaseTotal.ToString("0.00", CultureInfo.InvariantCulture)}"
+                        });
+                    }
+
+                    // Fecha local de México (UTC−6), igual que en los endpoints de gastos.
+                    var expenseDate = DateOnly.FromDateTime(purchaseDate.AddHours(-6));
+                    var createdBy = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+                    var merchantName = merchant.Length > 0 ? merchant : "Súper";
+
+                    for (var i = 0; i < payments.Count; i++)
+                    {
+                        expenses.Add(new Expense
+                        {
+                            Date = expenseDate,
+                            Amount = payments[i].Amount,
+                            Merchant = merchantName,
+                            CategoryId = request.ExpenseCategoryId!.Value,
+                            CardId = payments[i].CardId,
+                            CreatedBy = createdBy,
+                            // Solo la primera parte lleva el ClientRequestId, así el índice único no choca.
+                            ClientRequestId = i == 0 ? request.ClientRequestId : null
+                        });
+                    }
+                }
+
+                // Al agregar la compra, EF también agrega sus gastos (colección Expenses).
                 var purchase = new Purchase
                 {
-                    PurchaseDate = DateTime.UtcNow,
-                    TotalAmount = PromoCalculator.Round(totalAmount),
+                    PurchaseDate = purchaseDate,
+                    TotalAmount = purchaseTotal,
                     ClientRequestId = request.ClientRequestId,
+                    Expenses = expenses,
                     PurchaseItems = purchaseItems
                 };
 
@@ -160,6 +251,7 @@ namespace PantryManager.API.Controllers
 
             var purchases = await _context.Purchases
                 .Include(p => p.PurchaseItems).ThenInclude(pi => pi.Product)
+                .Include(p => p.Expenses)
                 .OrderByDescending(p => p.PurchaseDate)
                 .Skip(skip)
                 .Take(take)
@@ -210,6 +302,7 @@ namespace PantryManager.API.Controllers
         {
             var purchase = await _context.Purchases
                 .Include(p => p.PurchaseItems).ThenInclude(pi => pi.Product)
+                .Include(p => p.Expenses)
                 .FirstOrDefaultAsync(p => p.Id == id);
 
             if (purchase == null) return NotFound();
@@ -221,6 +314,7 @@ namespace PantryManager.API.Controllers
         {
             return _context.Purchases
                 .Include(p => p.PurchaseItems).ThenInclude(pi => pi.Product)
+                .Include(p => p.Expenses)
                 .FirstOrDefaultAsync(p => p.ClientRequestId == clientRequestId);
         }
 
@@ -232,6 +326,7 @@ namespace PantryManager.API.Controllers
                 // EF devuelve la fecha sin zona; se marca como UTC para que el navegador la convierta bien.
                 PurchaseDate = DateTime.SpecifyKind(purchase.PurchaseDate, DateTimeKind.Utc),
                 TotalAmount = purchase.TotalAmount,
+                ExpenseIds = purchase.Expenses.Select(e => e.Id).ToList(),
                 Items = purchase.PurchaseItems.Select(pi => ToItemDto(pi)).ToList()
             };
         }
@@ -257,6 +352,22 @@ namespace PantryManager.API.Controllers
         {
             public Guid? ClientRequestId { get; set; }
             public List<PurchaseItemRequest> Items { get; set; } = new List<PurchaseItemRequest>();
+
+            // Momento en que se capturó la compra. Si está fuera de la ventana permitida se usa el momento del envío.
+            public DateTime? PurchasedAt { get; set; }
+            // Si es true, la compra también crea un gasto (la categoría es obligatoria).
+            public bool CreateExpense { get; set; }
+            public int? ExpenseCategoryId { get; set; }
+            public string? Merchant { get; set; }
+            // Cómo se pagó la compra: una parte por método de pago (tarjeta o efectivo). Se usa solo con CreateExpense.
+            public List<PurchasePaymentRequest>? Payments { get; set; }
+        }
+
+        public class PurchasePaymentRequest
+        {
+            // Null = efectivo.
+            public int? CardId { get; set; }
+            public decimal Amount { get; set; }
         }
 
         public class PurchaseItemRequest

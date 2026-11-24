@@ -36,6 +36,8 @@ namespace PantryManager.API.Models
         public int StockType { get; set; }
         public string? ImageUrl { get; set; }
         public decimal Quantity { get; set; } = 1;
+        // Lo genera la app. Si el mismo envío se reintenta, no vuelve a sumar la cantidad.
+        public Guid? ClientRequestId { get; set; }
     }
 
     public class UpdateListItemRequest

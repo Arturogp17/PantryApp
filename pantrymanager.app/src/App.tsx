@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import Super from "./pages/Super";
 import Inventario from "./pages/Inventario";
 import Compras from "./pages/Compras";
+import Gastos from "./pages/Gastos";
 import Ajustes from "./pages/Ajustes";
 import ProductsAdmin from "./pages/ProductsAdmin";
 
@@ -23,6 +24,7 @@ function App() {
             <Route element={<AppShell />}>
               <Route path="/super" element={<Super />} />
               <Route path="/compras" element={<Compras />} />
+              <Route path="/gastos" element={<Gastos />} />
               <Route path="/inventario" element={<Inventario />} />
               <Route path="/admin/products" element={<ProductsAdmin />} />
               <Route path="/ajustes" element={<Ajustes />} />

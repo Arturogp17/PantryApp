@@ -13,6 +13,9 @@ namespace PantryManager.API.Models
         // no la registre dos veces.
         public Guid? ClientRequestId { get; set; }
 
+        // Gastos creados con la compra: uno por cada método de pago. Vacía si la compra no generó gastos.
+        public List<Expense> Expenses { get; set; } = new List<Expense>();
+
         public List<PurchaseItem> PurchaseItems { get; set; } = new List<PurchaseItem>();
     }
 
@@ -21,6 +24,7 @@ namespace PantryManager.API.Models
         public int Id { get; set; }
         public DateTime PurchaseDate { get; set; }
         public decimal TotalAmount { get; set; }
+        public List<int> ExpenseIds { get; set; } = new List<int>();
         public List<PurchaseItemDto> Items { get; set; } = new List<PurchaseItemDto>();
     }
 
