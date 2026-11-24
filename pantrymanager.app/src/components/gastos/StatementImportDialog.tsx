@@ -280,6 +280,8 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [createdCards, setCreatedCards] = useState<Card[]>([]);
+
   // Las tarjetas recién creadas se suman mientras la página recarga la lista.
   const knownCards = useMemo(
     () => [...cards, ...createdCards.filter((c) => !cards.some((x) => x.id === c.id))],
@@ -306,8 +308,6 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported, o
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [result, setResult] = useState<StatementImportResult | null>(null);
-  // Tarjetas creadas en esta sesión del diálogo, para elegirlas antes de que la página recargue.
-  const [createdCards, setCreatedCards] = useState<Card[]>([]);
   const [cardFormOpen, setCardFormOpen] = useState(false);
   // Renglón (importKey) que pidió una categoría nueva; null si el diálogo está cerrado.
   const [newCategoryKey, setNewCategoryKey] = useState<string | null>(null);
