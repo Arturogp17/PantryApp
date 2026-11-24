@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Typography } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, FundsState, IncomeSource, PaidSinceCutoff, RecurringCharge, StatementSummary } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -120,6 +121,8 @@ const FundsDialog = ({ open, funds, onClose, onSaved }: FundsDialogProps) => {
       setSaving(false);
     }
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">

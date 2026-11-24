@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Box, Chip, Fab, IconButton, Snackbar, Typography } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
@@ -34,9 +35,20 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "salud", label: "Salud" },
 ];
 
+// La vista vive en la URL (?vista=...) para que el botón regresar vuelva a la vista anterior. Un valor inválido es resumen.
+const parseView = (value: string | null): View => (VIEWS.some((v) => v.id === value) ? (value as View) : "resumen");
+
 const Gastos = () => {
   const currentKey = monthKey(new Date());
-  const [view, setView] = useState<View>("resumen");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = parseView(searchParams.get("vista"));
+  // Push, no replace: cada cambio de vista queda en el historial.
+  const setView = (next: View) =>
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      params.set("vista", next);
+      return params;
+    });
   const [month, setMonth] = useState(currentKey);
   const [cards, setCards] = useState<Card[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -282,6 +294,7 @@ const Gastos = () => {
           if (notice) setNotice(notice);
           refresh();
         }}
+        onCategoryCreated={() => void loadCategories()}
       />
       <CardDialog
         open={cardOpen}
@@ -303,6 +316,7 @@ const Gastos = () => {
           setInstallmentOpen(false);
           refresh();
         }}
+        onCategoryCreated={() => void loadCategories()}
       />
       <RecurringDialog
         open={recurringOpen}
@@ -314,6 +328,7 @@ const Gastos = () => {
           setRecurringOpen(false);
           refresh();
         }}
+        onCategoryCreated={() => void loadCategories()}
       />
       <StatementImportDialog
         open={statementOpen}
@@ -324,6 +339,8 @@ const Gastos = () => {
           loadCards();
           refresh();
         }}
+        onCardCreated={() => void loadCards()}
+        onCategoryCreated={() => void loadCategories()}
       />
       <PaymentDialog
         open={paymentOpen}

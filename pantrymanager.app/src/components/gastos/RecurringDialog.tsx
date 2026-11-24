@@ -14,11 +14,13 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, ExpenseCategory, RecurringCharge, RecurringInput } from "../../types";
 import { errorMessage } from "../../lib/errors";
 import { roundMoney } from "../../lib/money";
 import { Dot } from "./charts";
+import NewCategoryDialog from "./NewCategoryDialog";
 
 interface Props {
   open: boolean;
@@ -28,6 +30,8 @@ interface Props {
   categories: ExpenseCategory[];
   onClose: () => void;
   onSaved: () => void;
+  // Se llama al crear una categoría desde este diálogo, para que la página la recargue.
+  onCategoryCreated: (c: ExpenseCategory) => void;
 }
 
 const CASH_COLOR = "#E0B13D";
@@ -43,7 +47,7 @@ const dayValue = (text: string): number | null => {
   return Number.isInteger(n) && n >= 1 && n <= 31 ? n : null;
 };
 
-const RecurringDialog = ({ open, item, cards, categories, onClose, onSaved }: Props) => {
+const RecurringDialog = ({ open, item, cards, categories, onClose, onSaved, onCategoryCreated }: Props) => {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [frequency, setFrequency] = useState<"monthly" | "yearly">("monthly");
@@ -51,6 +55,7 @@ const RecurringDialog = ({ open, item, cards, categories, onClose, onSaved }: Pr
   const [monthText, setMonthText] = useState("1");
   const [cardId, setCardId] = useState<number | null>(null);
   const [categoryText, setCategoryText] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
   const [active, setActive] = useState(true);
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -135,6 +140,8 @@ const RecurringDialog = ({ open, item, cards, categories, onClose, onSaved }: Pr
       setConfirmDelete(false);
     }
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
@@ -250,6 +257,13 @@ const RecurringDialog = ({ open, item, cards, categories, onClose, onSaved }: Pr
               </MenuItem>
             ))}
           </TextField>
+          <Chip
+            label="+ Nueva"
+            clickable
+            variant="outlined"
+            onClick={() => setNewOpen(true)}
+            sx={{ height: 44, alignSelf: "flex-start" }}
+          />
 
           <FormControlLabel
             control={<Switch checked={active} onChange={(e) => setActive(e.target.checked)} />}
@@ -259,6 +273,17 @@ const RecurringDialog = ({ open, item, cards, categories, onClose, onSaved }: Pr
           {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </DialogContent>
+      <NewCategoryDialog
+        open={newOpen}
+        parent={null}
+        categories={categories}
+        onClose={() => setNewOpen(false)}
+        onCreated={(c) => {
+          setNewOpen(false);
+          setCategoryText(String(c.id));
+          onCategoryCreated(c);
+        }}
+      />
       <DialogActions sx={{ px: 3, pb: 2, gap: 1, justifyContent: item ? "space-between" : "flex-end" }}>
         {item && (
           <Button color="error" onClick={remove} disabled={saving}>

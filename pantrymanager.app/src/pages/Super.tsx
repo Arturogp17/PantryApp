@@ -28,8 +28,10 @@ import ItemDialog, { ItemDraft } from "../components/ItemDialog";
 import { useAppTheme } from "../theme/ThemeContext";
 import { rowStyle } from "../theme/rowStyle";
 import { useCatalog } from "../hooks/useCatalog";
+import { useBackToClose } from "../hooks/useBackToClose";
 import { useShoppingList } from "../hooks/useShoppingList";
 import { PaymentSplit, SplitRow, addSplitRow, endSplit, rowsToParts, startSplit } from "../components/gastos/PaymentSplit";
+import NewCategoryDialog from "../components/gastos/NewCategoryDialog";
 import { resolveSplit } from "../lib/split";
 import { BarcodeLookup, Card, ExpenseCategory, ShoppingListItem } from "../types";
 import { CartLine, addLine, cartTotal, lineSavings, lineTotal, removeLine, toPurchaseItems, updateLine } from "../lib/cart";
@@ -154,10 +156,11 @@ interface CheckoutDialogProps {
   options: PaymentOptions | null;
   onClose: () => void;
   onConfirm: (payment: PurchasePayment) => void;
+  onCategoryCreated: (c: ExpenseCategory) => void;
 }
 
 // Pregunta con qué se pagó y si se registra como gasto. Recuerda la última elección.
-const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm }: CheckoutDialogProps) => {
+const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm, onCategoryCreated }: CheckoutDialogProps) => {
   const cards = useMemo(() => (options?.cards ?? []).filter((c) => c.isActive), [options]);
   const categories = useMemo(() => options?.categories ?? [], [options]);
   const topLevel = useMemo(() => categories.filter((c) => c.parentId === null), [categories]);
@@ -170,6 +173,7 @@ const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm }:
   const [merchant, setMerchant] = useState("Súper");
   const [merchantTouched, setMerchantTouched] = useState(false);
   const [createExpense, setCreateExpense] = useState(true);
+  const [newOpen, setNewOpen] = useState(false);
 
   // Solo al abrir: si las opciones se actualizan mientras se elige, no se borra lo que ya eligió la persona.
   useEffect(() => {
@@ -229,6 +233,8 @@ const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm }:
     onConfirm(payment);
   };
 
+  useBackToClose(open, onClose);
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
       <DialogTitle>¿Cómo pagaste?</DialogTitle>
@@ -269,6 +275,7 @@ const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm }:
                   sx={{ height: 44 }}
                 />
               ))}
+              <Chip label="+ Nueva" clickable variant="outlined" onClick={() => setNewOpen(true)} sx={{ height: 44 }} />
             </Box>
           </Box>
 
@@ -301,6 +308,17 @@ const CheckoutDialog = ({ open, total, lineCount, options, onClose, onConfirm }:
           </Box>
         </Box>
       </DialogContent>
+      <NewCategoryDialog
+        open={newOpen}
+        parent={null}
+        categories={categories}
+        onClose={() => setNewOpen(false)}
+        onCreated={(c) => {
+          setNewOpen(false);
+          setCategoryId(c.id);
+          onCategoryCreated(c);
+        }}
+      />
       <DialogActions>
         <Button onClick={onClose}>Todavía no</Button>
         <Button variant="contained" onClick={confirm} disabled={error !== null}>
@@ -586,6 +604,16 @@ const Super = () => {
     }
   };
 
+  // Una categoría nueva entra a la lista del diálogo de pago y a la copia guardada, para usarla sin señal.
+  const onPaymentCategoryCreated = (c: ExpenseCategory) => {
+    const next: PaymentOptions = {
+      cards: paymentOptions?.cards ?? [],
+      categories: [...(paymentOptions?.categories ?? []).filter((x) => x.id !== c.id), c],
+    };
+    writeJson(PAYMENT_OPTIONS_KEY, next);
+    setPaymentOptions(next);
+  };
+
   const heroRadius = Math.round(tokens.radius * 1.4);
 
   return (
@@ -829,6 +857,7 @@ const Super = () => {
         options={paymentOptions}
         onClose={() => setPaymentOpen(false)}
         onConfirm={(payment) => void finishPurchase(payment)}
+        onCategoryCreated={onPaymentCategoryCreated}
       />
 
       <Snackbar

@@ -15,10 +15,11 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, Expense, ExpenseCategory, StatementImportRequest, StatementImportResult } from "../../types";
 import { errorMessage } from "../../lib/errors";
-import { dateLabel, dayLabel, shiftDays } from "../../lib/expenses";
+import { CARD_COLORS, dateLabel, dayLabel, shiftDays } from "../../lib/expenses";
 import { formatMoney } from "../../lib/money";
 import { parseStatement } from "../../lib/statements/parse";
 import { extractPdfLines } from "../../lib/statements/pdfText";
@@ -27,6 +28,7 @@ import type { ExpenseDraft, ImportDraft } from "../../lib/statements/import";
 import { suggestCategoryId } from "../../lib/statements/categorize";
 import { StatementParseError } from "../../lib/statements/types";
 import type { ParsedStatement } from "../../lib/statements/types";
+import NewCategoryDialog from "./NewCategoryDialog";
 
 interface Props {
   open: boolean;
@@ -34,6 +36,10 @@ interface Props {
   categories: ExpenseCategory[];
   onClose: () => void;
   onImported: () => void;
+  // Tarjeta creada desde el estado: la página recarga sus tarjetas.
+  onCardCreated: (card: Card) => void;
+  // Categoría creada desde el importador: la página recarga sus categorías.
+  onCategoryCreated: (c: ExpenseCategory) => void;
 }
 
 type Step = "file" | "review" | "done";
@@ -47,6 +53,8 @@ const READ_NOTE = "El archivo se lee en tu teléfono y no se sube a ningún lado
 const BANK_NAMES: Record<ParsedStatement["bank"], string> = { banamex: "Banamex", bbva: "BBVA" };
 // Sin reglas de aprendizaje: la categoría de intereses sale siempre de las reglas por texto.
 const INTEREST_MERCHANT = "Intereses y comisiones";
+// Valor del select de categoría que abre el diálogo de nueva categoría.
+const NEW_CATEGORY = "__nueva__";
 
 const bySortOrder = (a: ExpenseCategory, b: ExpenseCategory): number => a.sortOrder - b.sortOrder;
 
@@ -77,9 +85,10 @@ interface ExpenseRowProps {
   options: CategoryOption[];
   onToggle: (on: boolean) => void;
   onCategory: (id: number | null) => void;
+  onNewCategory: () => void;
 }
 
-const ExpenseRow = ({ row, on, captured, categoryId, options, onToggle, onCategory }: ExpenseRowProps) => {
+const ExpenseRow = ({ row, on, captured, categoryId, options, onToggle, onCategory, onNewCategory }: ExpenseRowProps) => {
   const missing = on && categoryId === null;
   return (
     <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1, py: 1, borderBottom: 1, borderColor: "divider", opacity: on ? 1 : 0.6 }}>
@@ -101,7 +110,13 @@ const ExpenseRow = ({ row, on, captured, categoryId, options, onToggle, onCatego
           fullWidth
           label="Categoría"
           value={categoryId ?? ""}
-          onChange={(e) => onCategory(e.target.value === "" ? null : Number(e.target.value))}
+          onChange={(e) => {
+            if (e.target.value === NEW_CATEGORY) {
+              onNewCategory();
+              return;
+            }
+            onCategory(e.target.value === "" ? null : Number(e.target.value));
+          }}
           error={missing}
           helperText={missing ? "Elige una categoría" : " "}
           sx={{ mt: 0.5 }}
@@ -111,18 +126,166 @@ const ExpenseRow = ({ row, on, captured, categoryId, options, onToggle, onCatego
               {o.label}
             </MenuItem>
           ))}
+          <MenuItem value={NEW_CATEGORY}>Nueva categoría…</MenuItem>
         </TextField>
       </Box>
     </Box>
   );
 };
 
-const StatementImportDialog = ({ open, cards, categories, onClose, onImported }: Props) => {
+const dayValue = (text: string): number | null => {
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 1 && n <= 31 ? n : null;
+};
+
+// Vacío es null (sin tasa). Acepta decimales con punto, de 0 a 200.
+const rateValue = (text: string): number | null => {
+  if (!/^\d+(\.\d*)?$/.test(text)) return null;
+  const n = Number(text);
+  return n <= 200 ? n : null;
+};
+
+interface CardFromStatementProps {
+  open: boolean;
+  parsed: ParsedStatement;
+  onClose: () => void;
+  onCreated: (card: Card) => void;
+}
+
+// Crea una tarjeta de crédito con lo que trae el estado. Todo se puede corregir antes de guardar.
+const CardFromStatementDialog = ({ open, parsed, onClose, onCreated }: CardFromStatementProps) => {
+  const [name, setName] = useState("");
+  const [bank, setBank] = useState("");
+  const [last4, setLast4] = useState("");
+  const [cutoff, setCutoff] = useState("");
+  const [due, setDue] = useState("");
+  const [rate, setRate] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setTouched(false);
+    setSaving(false);
+    setError("");
+    setName(`${BANK_NAMES[parsed.bank]} ·${parsed.last4}`);
+    setBank(BANK_NAMES[parsed.bank]);
+    setLast4(parsed.last4);
+    setCutoff(String(Number(parsed.periodEnd.slice(8, 10))));
+    setDue(String(Number(parsed.dueDate.slice(8, 10))));
+    setRate(parsed.annualRate === null ? "" : String(parsed.annualRate));
+  }, [open, parsed]);
+
+  const nameError = name.trim().length === 0;
+  const last4Error = !/^[0-9]{4}$/.test(last4);
+  const cutoffError = dayValue(cutoff) === null;
+  const dueError = dayValue(due) === null;
+  const rateError = rate !== "" && rateValue(rate) === null;
+  const invalid = nameError || last4Error || cutoffError || dueError || rateError;
+
+  const submit = async () => {
+    setTouched(true);
+    if (invalid || saving) return;
+
+    setSaving(true);
+    setError("");
+    try {
+      const r = await api.post<Card>("/cards", {
+        name: name.trim(),
+        bank: bank.trim(),
+        kind: "credit",
+        last4,
+        color: CARD_COLORS[0],
+        cutoffDay: dayValue(cutoff),
+        dueDay: dayValue(due),
+        annualRate: rateValue(rate),
+        isActive: true,
+      });
+      setSaving(false);
+      onCreated(r.data);
+    } catch (err) {
+      setError(errorMessage(err, "No se pudo crear la tarjeta"));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+      <DialogTitle>Nueva tarjeta desde el estado</DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+          <TextField
+            label="Nombre"
+            value={name}
+            autoFocus
+            onChange={(e) => setName(e.target.value)}
+            error={touched && nameError}
+            helperText={touched && nameError ? "Escribe un nombre" : " "}
+            slotProps={{ htmlInput: { maxLength: 80 } }}
+          />
+          <TextField label="Banco" value={bank} onChange={(e) => setBank(e.target.value)} slotProps={{ htmlInput: { maxLength: 40 } }} />
+          <Typography sx={{ fontSize: 14, color: "text.secondary" }}>Tipo: crédito</Typography>
+          <TextField
+            label="Últimos 4 dígitos"
+            value={last4}
+            onChange={(e) => setLast4(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            error={touched && last4Error}
+            helperText={touched && last4Error ? "Son 4 números" : " "}
+            slotProps={{ htmlInput: { inputMode: "numeric" } }}
+          />
+          <Box sx={{ display: "flex", gap: 1.5 }}>
+            <TextField
+              label="Día de corte"
+              value={cutoff}
+              onChange={(e) => setCutoff(e.target.value.replace(/\D/g, "").slice(0, 2))}
+              error={touched && cutoffError}
+              helperText={touched && cutoffError ? "De 1 a 31" : " "}
+              slotProps={{ htmlInput: { inputMode: "numeric" } }}
+            />
+            <TextField
+              label="Día de pago"
+              value={due}
+              onChange={(e) => setDue(e.target.value.replace(/\D/g, "").slice(0, 2))}
+              error={touched && dueError}
+              helperText={touched && dueError ? "De 1 a 31" : " "}
+              slotProps={{ htmlInput: { inputMode: "numeric" } }}
+            />
+          </Box>
+          <TextField
+            label="Tasa de interés anual (%)"
+            value={rate}
+            onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, "").slice(0, 6))}
+            error={touched && rateError}
+            helperText={touched && rateError ? "Escribe un porcentaje, por ejemplo 50.82" : "La toma el estado de cuenta. Puedes corregirla aquí."}
+            slotProps={{ htmlInput: { inputMode: "decimal" } }}
+          />
+          {error && <Alert severity="error">{error}</Alert>}
+        </Box>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2, gap: 1, justifyContent: "flex-end" }}>
+        <Button onClick={onClose} disabled={saving}>
+          Cancelar
+        </Button>
+        <Button variant="contained" onClick={() => void submit()} disabled={saving}>
+          {saving ? "Guardando…" : "Guardar"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const StatementImportDialog = ({ open, cards, categories, onClose, onImported, onCardCreated, onCategoryCreated }: Props) => {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const creditCards = useMemo(() => cards.filter((c) => c.kind === "credit" && c.isActive), [cards]);
+  // Las tarjetas recién creadas se suman mientras la página recarga la lista.
+  const knownCards = useMemo(
+    () => [...cards, ...createdCards.filter((c) => !cards.some((x) => x.id === c.id))],
+    [cards, createdCards]
+  );
+  const creditCards = useMemo(() => knownCards.filter((c) => c.kind === "credit" && c.isActive), [knownCards]);
   const options = useMemo(() => buildCategoryOptions(categories), [categories]);
 
   const [step, setStep] = useState<Step>("file");
@@ -143,6 +306,11 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [result, setResult] = useState<StatementImportResult | null>(null);
+  // Tarjetas creadas en esta sesión del diálogo, para elegirlas antes de que la página recargue.
+  const [createdCards, setCreatedCards] = useState<Card[]>([]);
+  const [cardFormOpen, setCardFormOpen] = useState(false);
+  // Renglón (importKey) que pidió una categoría nueva; null si el diálogo está cerrado.
+  const [newCategoryKey, setNewCategoryKey] = useState<string | null>(null);
 
   const resetAll = useCallback(() => {
     setStep("file");
@@ -160,6 +328,9 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
     setSaving(false);
     setSaveError("");
     setResult(null);
+    setCreatedCards([]);
+    setCardFormOpen(false);
+    setNewCategoryKey(null);
   }, []);
 
   useEffect(() => {
@@ -197,6 +368,20 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
     // Se vacía para que volver a elegir el mismo archivo también dispare el cambio.
     e.target.value = "";
     if (file) void chooseFile(file);
+  };
+
+  const onCardFormCreated = (card: Card) => {
+    setCreatedCards((prev) => [...prev, card]);
+    setCardId(card.id);
+    setCardFormOpen(false);
+    onCardCreated(card);
+  };
+
+  const onCategoryFormCreated = (c: ExpenseCategory) => {
+    const key = newCategoryKey;
+    if (key !== null) setPicked((prev) => ({ ...prev, [key]: c.id }));
+    setNewCategoryKey(null);
+    onCategoryCreated(c);
   };
 
   // Gastos ya capturados de la tarjeta en el periodo (con margen de días) y gastos recientes para proponer categoría.
@@ -344,6 +529,8 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
     void loadExpenses(parsed, selectedCard, draft);
   };
 
+  useBackToClose(open, finish);
+
   return (
     <Dialog open={open} onClose={finish} fullScreen={fullScreen} fullWidth maxWidth="sm">
       <DialogTitle>Importar estado de cuenta</DialogTitle>
@@ -382,10 +569,21 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
                       ))}
                     </Box>
                     {noCardMatches && (
-                      <Alert severity="warning" sx={{ mt: 1.5 }}>
-                        {`Ninguna tarjeta termina en ${parsed.last4}. Elige una o agrégala en Tarjetas.`}
-                      </Alert>
+                      <>
+                        <Alert severity="warning" sx={{ mt: 1.5 }}>
+                          {`Ninguna tarjeta termina en ${parsed.last4}. Elige una o agrégala en Tarjetas.`}
+                        </Alert>
+                        <Button variant="outlined" fullWidth sx={{ mt: 1, minHeight: 44 }} onClick={() => setCardFormOpen(true)}>
+                          Crear tarjeta con los datos del estado
+                        </Button>
+                      </>
                     )}
+                    <CardFromStatementDialog
+                      open={cardFormOpen}
+                      parsed={parsed}
+                      onClose={() => setCardFormOpen(false)}
+                      onCreated={onCardFormCreated}
+                    />
                   </Box>
                   <Button variant="contained" fullWidth disabled={!selectedCard} onClick={startReview}>
                     Revisar estado
@@ -493,6 +691,7 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
                         options={options}
                         onToggle={(on) => setExpenseOn(d.importKey, on)}
                         onCategory={(id) => setPicked((prev) => ({ ...prev, [d.importKey]: id }))}
+                        onNewCategory={() => setNewCategoryKey(d.importKey)}
                       />
                     ))}
                   </>
@@ -502,6 +701,14 @@ const StatementImportDialog = ({ open, cards, categories, onClose, onImported }:
               {saveError && <Alert severity="error">{saveError}</Alert>}
             </>
           )}
+
+          <NewCategoryDialog
+            open={newCategoryKey !== null}
+            parent={null}
+            categories={categories}
+            onClose={() => setNewCategoryKey(null)}
+            onCreated={onCategoryFormCreated}
+          />
 
           {step === "done" && result && (
             <Alert severity="success">

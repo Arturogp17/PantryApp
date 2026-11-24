@@ -13,6 +13,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, CardPayment, CardPaymentInput } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -155,6 +156,8 @@ const PaymentDialog = ({ open, cards, cardId = null, suggestedAmount = null, onC
       setSaving(false);
     }
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">

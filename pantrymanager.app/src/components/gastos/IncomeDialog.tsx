@@ -14,6 +14,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, IncomeInput, IncomeSource } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -171,6 +172,9 @@ const IncomeDialog = ({ open, sources, cards, onClose, onChanged }: Props) => {
       setSaving(false);
     }
   };
+
+  // Un solo hook para las dos vistas (lista y formulario) porque comparten open.
+  useBackToClose(open, onClose);
 
   if (mode === "list") {
     return (

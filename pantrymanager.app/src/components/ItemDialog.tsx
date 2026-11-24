@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useBackToClose } from "../hooks/useBackToClose";
 import { Product } from "../types";
 import { STOCK_TYPES, unitLabel, unitStep } from "../lib/units";
 import { formatMoney } from "../lib/money";
@@ -70,6 +71,9 @@ const ItemDialog = ({ open, mode, title, draft, findMatches, onClose, onSubmit }
     setPromoValue(draft.promo ? String(draft.promo.value) : "");
     setTouched(false);
   }, [open, draft]);
+
+  // Antes del return temprano: los hooks no pueden ir después de un return condicional.
+  useBackToClose(open, onClose);
 
   if (!draft) return null;
 

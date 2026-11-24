@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Typography } from "@mui/material";
 import { cameraSupported, startScanner, StopScanner } from "../lib/scanner";
 import { isValidBarcode, normalizeBarcode } from "../lib/barcode";
+import { useBackToClose } from "../hooks/useBackToClose";
 
 interface BarcodeScannerProps {
   open: boolean;
@@ -72,6 +73,8 @@ const BarcodeScanner = ({ open, onClose, onDetected }: BarcodeScannerProps) => {
     handledRef.current = true;
     onDetected(code);
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">

@@ -24,6 +24,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Add, Delete, Edit } from "@mui/icons-material";
+import { useBackToClose } from "../hooks/useBackToClose";
 import api from "../api/client";
 import { Product } from "../types";
 import { useAuth } from "../contexts/AuthContext";
@@ -75,6 +76,9 @@ const ProductsAdmin = () => {
   useEffect(() => {
     if (isAdmin) load();
   }, [isAdmin, load]);
+
+  // Antes del return de acceso no autorizado: los hooks no pueden ir después de un return condicional.
+  useBackToClose(draft !== null, () => setDraft(null));
 
   if (!isAdmin) {
     return (

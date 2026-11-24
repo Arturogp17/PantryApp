@@ -12,12 +12,14 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, ExpenseCategory, InstallmentInput, InstallmentPlan } from "../../types";
 import { errorMessage } from "../../lib/errors";
 import { todayKey } from "../../lib/expenses";
 import { formatMoney, roundMoney } from "../../lib/money";
 import { Dot } from "./charts";
+import NewCategoryDialog from "./NewCategoryDialog";
 
 interface Props {
   open: boolean;
@@ -27,6 +29,8 @@ interface Props {
   categories: ExpenseCategory[];
   onClose: () => void;
   onSaved: () => void;
+  // Se llama al crear una categoría desde este diálogo, para que la página la recargue.
+  onCategoryCreated: (c: ExpenseCategory) => void;
 }
 
 const MONTH_OPTIONS = [3, 6, 9, 12, 18, 24];
@@ -35,13 +39,14 @@ const MAX_MONTHS = 60;
 
 const toNumber = (text: string): number => Number(text.replace(/,/g, ""));
 
-const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved }: Props) => {
+const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved, onCategoryCreated }: Props) => {
   const [name, setName] = useState("");
   const [cardId, setCardId] = useState<number | null>(null);
   const [totalText, setTotalText] = useState("");
   const [monthsText, setMonthsText] = useState("");
   const [firstDate, setFirstDate] = useState(todayKey());
   const [categoryText, setCategoryText] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
   const [note, setNote] = useState("");
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -126,6 +131,8 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved }: 
       setConfirmDelete(false);
     }
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
@@ -233,6 +240,13 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved }: 
               </MenuItem>
             ))}
           </TextField>
+          <Chip
+            label="+ Nueva"
+            clickable
+            variant="outlined"
+            onClick={() => setNewOpen(true)}
+            sx={{ height: 44, alignSelf: "flex-start" }}
+          />
 
           <TextField
             label="Nota (opcional)"
@@ -244,6 +258,17 @@ const InstallmentDialog = ({ open, plan, cards, categories, onClose, onSaved }: 
           {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </DialogContent>
+      <NewCategoryDialog
+        open={newOpen}
+        parent={null}
+        categories={categories}
+        onClose={() => setNewOpen(false)}
+        onCreated={(c) => {
+          setNewOpen(false);
+          setCategoryText(String(c.id));
+          onCategoryCreated(c);
+        }}
+      />
       <DialogActions sx={{ px: 3, pb: 2, gap: 1, justifyContent: plan ? "space-between" : "flex-end" }}>
         {plan && (
           <Button color="error" onClick={remove} disabled={saving}>

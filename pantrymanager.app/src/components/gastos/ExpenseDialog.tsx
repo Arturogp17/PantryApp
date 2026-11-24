@@ -13,6 +13,7 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card, Expense, ExpenseCategory, ExpenseInput } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -31,6 +32,7 @@ import {
   startSplit,
   toAmount,
 } from "./PaymentSplit";
+import NewCategoryDialog from "./NewCategoryDialog";
 
 const OFFLINE_CREATED = "Gasto guardado sin conexión. Se subirá solo.";
 const OFFLINE_EDIT_OR_DELETE = "Sin conexión. Editar y borrar gastos necesita internet.";
@@ -44,11 +46,13 @@ interface Props {
   onClose: () => void;
   // Recibe un aviso opcional para mostrar en la pantalla de gastos.
   onSaved: (notice?: string) => void;
+  // Se llama al crear una categoría desde este diálogo, para que la página la recargue.
+  onCategoryCreated: (c: ExpenseCategory) => void;
 }
 
 const labelOf = (c: Card): string => (c.last4 ? `${c.name} ·${c.last4}` : c.name);
 
-const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: Props) => {
+const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved, onCategoryCreated }: Props) => {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
@@ -71,12 +75,24 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
   const [doneRows, setDoneRows] = useState<boolean[]>([]);
   // Un id por parte, generado al abrir: reintentar una parte no crea otro gasto.
   const requestIds = useRef<string[]>([]);
+  // Tras crear una categoría, la recarga de categorías no debe borrar lo que ya se escribió.
+  const skipReset = useRef(false);
+  const wasOpen = useRef(false);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newParent, setNewParent] = useState<ExpenseCategory | null>(null);
 
   const topLevel = useMemo(() => categories.filter((c) => c.parentId === null), [categories]);
   const childrenOf = (id: number | null) => categories.filter((c) => c.parentId === id && id !== null);
 
   useEffect(() => {
+    const reopened = open && !wasOpen.current;
+    wasOpen.current = open;
     if (!open) return;
+    if (!reopened && skipReset.current) {
+      skipReset.current = false;
+      return;
+    }
+    skipReset.current = false;
 
     setError("");
     setTouched(false);
@@ -154,6 +170,26 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
         setRows([{ cardId: match.cardId, amount: "" }]);
       }
     }
+  };
+
+  const openNewCategory = (parent: ExpenseCategory | null) => {
+    setNewParent(parent);
+    setNewOpen(true);
+  };
+
+  // Queda seleccionada: si es subcategoría, se elige también su principal.
+  const onCategoryMade = (c: ExpenseCategory) => {
+    skipReset.current = true;
+    setCategoryTouched(true);
+    if (c.parentId === null) {
+      setParentId(c.id);
+      setSubId(null);
+    } else {
+      setParentId(c.parentId);
+      setSubId(c.id);
+    }
+    setNewOpen(false);
+    onCategoryCreated(c);
   };
 
   const pickParent = (id: number) => {
@@ -258,6 +294,8 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
 
   const subs = childrenOf(parentId);
 
+  useBackToClose(open, onClose);
+
   return (
     <Dialog open={open} onClose={onClose} fullScreen={fullScreen} fullWidth maxWidth="xs">
       <DialogTitle>{expense ? "Editar gasto" : "Agregar gasto"}</DialogTitle>
@@ -306,6 +344,13 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
                   sx={{ height: 44 }}
                 />
               ))}
+              <Chip
+                label="+ Nueva"
+                clickable
+                variant="outlined"
+                onClick={() => openNewCategory(null)}
+                sx={{ height: 44 }}
+              />
             </Box>
             {touched && categoryError && (
               <Typography variant="caption" sx={{ color: "error.main" }}>
@@ -314,7 +359,7 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
             )}
           </Box>
 
-          {subs.length > 0 && (
+          {parentId !== null && (
             <Box>
               <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1 }}>Subcategoría (opcional)</Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
@@ -332,6 +377,13 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
                     sx={{ height: 44 }}
                   />
                 ))}
+                <Chip
+                  label="+ Nueva"
+                  clickable
+                  variant="outlined"
+                  onClick={() => openNewCategory(categories.find((c) => c.id === parentId) ?? null)}
+                  sx={{ height: 44 }}
+                />
               </Box>
             </Box>
           )}
@@ -369,6 +421,13 @@ const ExpenseDialog = ({ open, expense, cards, categories, onClose, onSaved }: P
           {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </DialogContent>
+      <NewCategoryDialog
+        open={newOpen}
+        parent={newParent}
+        categories={categories}
+        onClose={() => setNewOpen(false)}
+        onCreated={onCategoryMade}
+      />
       <DialogActions sx={{ px: 3, pb: 2, gap: 1, justifyContent: expense ? "space-between" : "flex-end" }}>
         {expense && (
           <Button color="error" onClick={remove} disabled={saving}>

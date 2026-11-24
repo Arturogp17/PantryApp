@@ -14,6 +14,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { Card } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -122,6 +123,8 @@ const CardDialog = ({ open, card, onClose, onSaved }: Props) => {
       setConfirmDelete(false);
     }
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">

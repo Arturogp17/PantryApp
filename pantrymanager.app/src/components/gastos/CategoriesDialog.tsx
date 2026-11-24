@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { ExpenseCategory } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -115,6 +116,8 @@ const CategoriesDialog = ({ open, categories, onClose, onChanged }: Props) => {
       )}
     </Box>
   );
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">

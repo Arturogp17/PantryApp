@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, TextField, Typography } from "@mui/material";
+import { useBackToClose } from "../../hooks/useBackToClose";
 import api from "../../api/client";
 import { CategoryBudget, ExpenseCategory } from "../../types";
 import { errorMessage } from "../../lib/errors";
@@ -77,6 +78,8 @@ const BudgetDialog = ({ open, categories, budgets, onClose, onSaved }: Props) =>
     setSaving(false);
     onSaved();
   };
+
+  useBackToClose(open, onClose);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
