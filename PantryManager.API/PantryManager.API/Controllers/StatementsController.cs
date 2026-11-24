@@ -30,14 +30,24 @@ namespace PantryManager.API.Controllers
         [HttpPost("import")]
         public async Task<ActionResult<StatementImportResultDto>> Import([FromBody] StatementImportRequest request)
         {
-            var data = request.Statement;
-            if (data == null) return BadRequest(new { Message = "Falta el estado de cuenta" });
+            var card = await _context.Cards.FindAsync(request.CardId);
+            if (card == null) return BadRequest(new { Message = "La tarjeta no existe" });
+            if (card.Kind != "credit" && card.Kind != "debit") return BadRequest(new { Message = "Los estados de cuenta solo se pueden importar a tarjetas de crédito o débito" });
+            if (!card.IsActive) return BadRequest(new { Message = "La tarjeta está desactivada" });
+            var isCredit = card.Kind == "credit";
 
-            var statementError = ValidateStatement(data);
-            if (statementError != null) return BadRequest(new { Message = statementError });
+            // En débito no hay estado de cuenta: si el request lo trae, no se valida ni se guarda.
+            var data = request.Statement;
+            if (isCredit)
+            {
+                if (data == null) return BadRequest(new { Message = "Falta el estado de cuenta" });
+                var statementError = ValidateStatement(data);
+                if (statementError != null) return BadRequest(new { Message = statementError });
+            }
 
             var installments = request.Installments ?? new List<StatementInstallmentRequest>();
             var expenses = request.Expenses ?? new List<StatementExpenseRequest>();
+            if (!isCredit && installments.Count > 0) return BadRequest(new { Message = "Los estados de débito no traen planes a meses" });
             if (installments.Count > MaxPlansPerImport) return BadRequest(new { Message = "Máximo 50 planes por importación" });
             if (expenses.Count > MaxExpensesPerImport) return BadRequest(new { Message = "Máximo 500 gastos por importación" });
 
@@ -56,11 +66,6 @@ namespace PantryManager.API.Controllers
             var importedBy = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
 
             await using var tx = await _context.Database.BeginTransactionAsync();
-
-            var card = await _context.Cards.FindAsync(request.CardId);
-            if (card == null) return BadRequest(new { Message = "La tarjeta no existe" });
-            if (card.Kind != "credit") return BadRequest(new { Message = "Los estados de cuenta solo se pueden importar a una tarjeta de crédito" });
-            if (!card.IsActive) return BadRequest(new { Message = "La tarjeta está desactivada" });
 
             var categoryIds = installments.Where(p => p.CategoryId.HasValue).Select(p => p.CategoryId!.Value)
                 .Concat(expenses.Select(e => e.CategoryId))
@@ -84,23 +89,28 @@ namespace PantryManager.API.Controllers
                 .Select(p => p.ImportKey)
                 .ToListAsync()).ToHashSet();
 
-            // Un estado por tarjeta y fecha de corte: reimportar el mismo lo actualiza.
-            var periodEnd = data.PeriodEnd;
-            var statement = await _context.CardStatements
-                .FirstOrDefaultAsync(s => s.CardId == request.CardId && s.PeriodEnd == periodEnd);
-            if (statement == null)
+            // Solo las tarjetas de crédito guardan estado. En débito no se toca CardStatement ni los datos de la tarjeta.
+            CardStatement? statement = null;
+            if (isCredit && data != null)
             {
-                statement = new CardStatement { CardId = request.CardId };
-                _context.CardStatements.Add(statement);
+                // Un estado por tarjeta y fecha de corte: reimportar el mismo lo actualiza.
+                var periodEnd = data.PeriodEnd;
+                statement = await _context.CardStatements
+                    .FirstOrDefaultAsync(s => s.CardId == request.CardId && s.PeriodEnd == periodEnd);
+                if (statement == null)
+                {
+                    statement = new CardStatement { CardId = request.CardId };
+                    _context.CardStatements.Add(statement);
+                }
+
+                CopyStatement(statement, data);
+                statement.ImportedAt = DateTime.UtcNow;
+                statement.ImportedBy = importedBy;
+
+                card.CutoffDay = data.PeriodEnd.Day;
+                card.DueDay = data.DueDate.Day;
+                if (data.AnnualRate.HasValue) card.AnnualRate = RoundRateOrNull(data.AnnualRate);
             }
-
-            CopyStatement(statement, data);
-            statement.ImportedAt = DateTime.UtcNow;
-            statement.ImportedBy = importedBy;
-
-            card.CutoffDay = data.PeriodEnd.Day;
-            card.DueDay = data.DueDate.Day;
-            if (data.AnnualRate.HasValue) card.AnnualRate = RoundRateOrNull(data.AnnualRate);
 
             var seenExpenseKeys = new HashSet<string>();
             var expensesCreated = 0;
@@ -170,7 +180,7 @@ namespace PantryManager.API.Controllers
 
             return Ok(new StatementImportResultDto
             {
-                StatementId = statement.Id,
+                StatementId = statement?.Id ?? 0,
                 ExpensesCreated = expensesCreated,
                 ExpensesSkipped = expensesSkipped,
                 PlansCreated = plansCreated,

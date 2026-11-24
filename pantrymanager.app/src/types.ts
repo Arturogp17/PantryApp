@@ -309,6 +309,7 @@ export interface StatementSummary {
 // Cuerpo de POST /statements/import. Solo sale lo que el usuario confirma; el PDF no se sube.
 export interface StatementImportRequest {
   cardId: number;
+  // null en tarjetas de débito: solo se importan gastos.
   statement: {
     periodStart: string;
     periodEnd: string;
@@ -322,7 +323,7 @@ export interface StatementImportRequest {
     creditLimit: number | null;
     availableCredit: number | null;
     annualRate: number | null;
-  };
+  } | null;
   installments: {
     importKey: string;
     name: string;

@@ -67,3 +67,32 @@ export interface ParsedStatement {
 }
 
 export class StatementParseError extends Error {}
+
+export type DebitMovementKind = "purchase" | "cash" | "transfer" | "fee" | "deposit";
+
+export interface DebitMovement {
+  date: string;
+  rawDescription: string;
+  merchant: string;
+  amount: number;
+  direction: "out" | "in";
+  kind: DebitMovementKind;
+  balance: number;
+}
+
+export interface DebitStatement {
+  bank: "banamex";
+  last4: string;
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: number;
+  closingBalance: number;
+  movements: DebitMovement[];
+  printedOut: number | null;
+  printedIn: number | null;
+  readOut: number;
+  readIn: number;
+  reconciles: boolean;
+}
+
+export type AnyStatement = { type: "credit"; statement: ParsedStatement } | { type: "debit"; statement: DebitStatement };

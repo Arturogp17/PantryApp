@@ -6,9 +6,10 @@ import {
   parseBanamexStatement,
   parseSpanishDate,
 } from "./statements/banamex";
-import { buildImportDraft, matchExistingExpenses } from "./statements/import";
+import { buildDebitDraft, buildImportDraft, debitDefaultChecked, matchExistingExpenses } from "./statements/import";
+import { isBanamexDebit, parseBanamexDebit } from "./statements/banamexDebit";
 import { parseBbvaStatement } from "./statements/bbva";
-import { parseStatement } from "./statements/parse";
+import { parseAnyStatement, parseStatement } from "./statements/parse";
 import { suggestCategoryId } from "./statements/categorize";
 import { piecesToLines } from "./statements/pdfText";
 import { StatementParseError } from "./statements/types";
@@ -350,5 +351,158 @@ describe("tasa anual con el orden de líneas de pdf.js", () => {
       "INTERESES 2 71.5% Sin IVA 55.52%",
     ];
     expect(annualRateAfterLabel(lines)).toBe(55.52);
+  });
+});
+
+// Estado de débito con datos inventados: varias páginas, un movimiento cruzado por encabezados,
+// un renglón sin monto y el cambio de año dic-ene.
+const SAMPLE_DEBIT = `
+Estado de Cuenta
+Cuenta Priority
+Fecha de corte¹ 31 de enero de 2027
+Período Del 1 de diciembre del 2026 al 31 de enero del 2027
+Número de Tarjeta de Débito 5200 1111 2222 3333
+Resumen Cuenta Priority En Pesos Moneda Nacional
+Saldo anterior 1,000.00
+Depósitos 5,000.00
+Retiros en efectivo 700.00
+Otros cargos 1,780.00
+Saldo al corte 3,520.00
+Saldo     Depósitos $900.00    $0.00    Saldo
+Detalle de Operaciones En pesos Moneda Nacional
+FECHA CONCEPTO RETIROS DEPÓSITOS SALDO
+01 DIC SALDO ANTERIOR 1,000.00
+02 DIC TIENDA EJEMPLO CENTRO
+EJM010101AB1
+20261202 9000/0001 150.00 850.00
+03 DIC DIS.EFE.BANAMEX CENTRO
+7543006627548 ATM
+EAS TRAN 700.00 150.00
+04 DIC DEPOSITO NOMINA EJEMPLO SA
+NOM010101AB2
+20261204 9000/0002 5,000.00 5,150.00
+05 DIC PAGO A TERCEROS REF.
+0326120500617014 EJEMPLO PEREZ AL BENEF
+000999.B61EJEMPLO.AR.1031.01
+Página 2 de 3
+Estado de Cuenta
+EJEMPLO PEREZ Cuenta Priority
+Suc. 1111 Centro, SLP
+Av. Ejemplo 100. Local 4
+Detalle de Operaciones En pesos Moneda Nacional
+FECHA CONCEPTO RETIROS DEPÓSITOS SALDO
+MARIA LOPEZ,RUIZ SU REF.0000617014 EJEMPLO PEREZ
+00005204165852391790 1,200.00 3,950.00
+06 DIC EXENCION COBRO COMISION
+PENALIZACION POR NO MANTENER
+EL SALDO PROMEDIO MINIMO
+IMPORTE A EXENTAR $ 500.00 3,950.00
+07 DIC COMISION POR MANEJO DE CUENTA 50.00 3,900.00
+08 ENE PAGO INTERBANCARIO A STP AL BENEF. EJEMPLO,PEREZ/LUNA
+(DATO NO VERIFICADO POR ESTA INSTITUCION) CTA.BENEFICIARIO 646180224403863467 CLAVE
+RASTREO 085901291584328261 REF. 0091026 Transferencia interbancaria MISMO DIA 300.00 3,600.00
+10 ENE TIENDA EJEMPLO SUR
+EJS020202CD3
+20260110 9000/0003 80.00 3,520.00
+`.split("\n");
+
+describe("estado de débito de Banamex", () => {
+  const debit = parseBanamexDebit(SAMPLE_DEBIT);
+
+  test("lee el resumen", () => {
+    expect(debit.last4).toBe("3333");
+    expect(debit.periodStart).toBe("2026-12-01");
+    expect(debit.periodEnd).toBe("2027-01-31");
+    expect(debit.openingBalance).toBe(1000);
+    expect(debit.closingBalance).toBe(3520);
+    expect(debit.printedOut).toBe(2480);
+    expect(debit.printedIn).toBe(5000);
+  });
+
+  test("el monto sale del cambio de saldo, con su dirección y tipo", () => {
+    expect(debit.movements.map((m) => m.kind)).toEqual(["purchase", "cash", "deposit", "transfer", "fee", "transfer", "purchase"]);
+    expect(debit.movements.map((m) => m.direction)).toEqual(["out", "out", "in", "out", "out", "out", "out"]);
+    expect(debit.movements.map((m) => m.amount)).toEqual([150, 700, 5000, 1200, 50, 300, 80]);
+  });
+
+  test("comercios: compra, retiro, transferencia con beneficiario y comisión", () => {
+    expect(debit.movements.map((m) => m.merchant)).toEqual([
+      "TIENDA EJEMPLO CENTRO",
+      "Retiro en cajero",
+      "DEPOSITO NOMINA EJEMPLO SA",
+      "Transferencia a MARIA LOPEZ RUIZ",
+      "COMISION POR MANEJO DE CUENTA",
+      "Transferencia a EJEMPLO PEREZ LUNA",
+      "TIENDA EJEMPLO SUR",
+    ]);
+  });
+
+  test("los encabezados de página no entran a la descripción", () => {
+    for (const m of debit.movements) {
+      expect(m.rawDescription).not.toContain("Página");
+      expect(m.rawDescription).not.toContain("Cuenta Priority");
+      expect(m.rawDescription).not.toContain("B61");
+      expect(m.rawDescription).not.toContain("Av. Ejemplo");
+    }
+    expect(debit.movements[3].rawDescription).toContain("MARIA LOPEZ,RUIZ");
+  });
+
+  test("el renglón que solo trae saldo no es un movimiento", () => {
+    expect(debit.movements.some((m) => m.rawDescription.includes("EXENCION"))).toBe(false);
+  });
+
+  test("cambio de año: diciembre es 2026 y enero es 2027", () => {
+    expect(debit.movements[0].date).toBe("2026-12-02");
+    expect(debit.movements.at(-1)?.date).toBe("2027-01-10");
+  });
+
+  test("lo leído cuadra con lo impreso", () => {
+    expect(debit.readOut).toBe(2480);
+    expect(debit.readIn).toBe(5000);
+    expect(debit.reconciles).toBe(true);
+  });
+
+  test("si falta un movimiento, no cuadra", () => {
+    const missing = SAMPLE_DEBIT.filter((l) => !l.includes("TIENDA EJEMPLO SUR"));
+    expect(parseBanamexDebit(missing).reconciles).toBe(false);
+  });
+
+  test("no guarda el número completo de la tarjeta", () => {
+    expect(JSON.stringify(debit)).not.toContain("5200 1111");
+    expect(JSON.stringify(debit)).not.toContain("1111222233");
+  });
+
+  test("un PDF que no es de débito se rechaza", () => {
+    expect(() => parseBanamexDebit(["Hola", "esto no es un estado"])).toThrow(StatementParseError);
+  });
+
+  test("distingue débito de crédito", () => {
+    expect(isBanamexDebit(SAMPLE_DEBIT)).toBe(true);
+    expect(isBanamexDebit(SAMPLE)).toBe(false);
+  });
+
+  test("parseAnyStatement elige débito antes que crédito", () => {
+    expect(parseAnyStatement(SAMPLE_DEBIT).type).toBe("debit");
+    expect(parseAnyStatement(SAMPLE).type).toBe("credit");
+  });
+});
+
+describe("importar un estado de débito", () => {
+  const debit = parseBanamexDebit(SAMPLE_DEBIT);
+  const drafts = buildDebitDraft(debit);
+
+  test("una entrada por cada movimiento de salida, sin depósitos", () => {
+    expect(drafts.map((d) => d.amount)).toEqual([150, 700, 1200, 50, 300, 80]);
+    expect(drafts.some((d) => d.amount === 5000)).toBe(false);
+  });
+
+  test("claves de importación con el índice entre las salidas", () => {
+    expect(drafts[0].importKey).toBe("banamex-debito:3333:2027-01-31:0");
+    expect(drafts[4].importKey).toBe("banamex-debito:3333:2027-01-31:4");
+    expect(new Set(drafts.map((d) => d.importKey)).size).toBe(drafts.length);
+  });
+
+  test("marcado por defecto solo para compras y comisiones", () => {
+    expect(debit.movements.map(debitDefaultChecked)).toEqual([true, false, false, false, true, false, true]);
   });
 });

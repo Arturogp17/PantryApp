@@ -1,6 +1,6 @@
 import type { Card, Expense } from "../../types";
 import { firstPaymentFromStatement } from "./banamex";
-import type { ParsedStatement, StatementLine } from "./types";
+import type { DebitMovement, DebitMovementKind, DebitStatement, ParsedStatement, StatementLine } from "./types";
 
 // Lo que se propone importar de un estado. La pantalla de revisión deja quitar renglones y elegir categoría.
 export interface ExpenseDraft {
@@ -134,4 +134,31 @@ export function matchExistingExpenses(drafts: ExpenseDraft[], existing: Expense[
   }
 
   return matches;
+}
+
+export const DEBIT_KIND_LABELS: Record<DebitMovementKind, string> = {
+  purchase: "Compra",
+  cash: "Retiro de efectivo",
+  transfer: "Transferencia",
+  fee: "Comisión",
+  deposit: "Depósito",
+};
+
+// Un borrador por cada movimiento de salida. Los depósitos no se importan como gasto.
+export function buildDebitDraft(statement: DebitStatement): ExpenseDraft[] {
+  const outs = statement.movements.filter((m) => m.direction === "out");
+  return outs.map((m, i) => ({
+    importKey: `banamex-debito:${statement.last4}:${statement.periodEnd}:${i}`,
+    date: m.date,
+    amount: m.amount,
+    merchant: m.merchant,
+    note: null,
+    isInterest: false,
+    line: null,
+  }));
+}
+
+// Viene marcado para importar solo compras y comisiones; retiros y transferencias quedan sin marcar.
+export function debitDefaultChecked(m: DebitMovement): boolean {
+  return m.kind === "purchase" || m.kind === "fee";
 }
